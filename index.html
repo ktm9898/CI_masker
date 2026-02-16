@@ -1429,16 +1429,24 @@
             const entityLabelsRaw = ['상호', '회사명', '법인명', '업체명', '사업자', '대표이사', '대표자', '대표', '성명', '성함', '주민등록번호', '법인등록번호', '등록번호'];
 
             // Stop Labels: Flexible regex
-            const stopLabelsRaw = ['사업자', '등록번호', '대표이사', '대표자', '대표', '성명', '성함', '주소', '소재지', '본점', '거주지', '업태', '종목', '전화번호', '팩스', '주민', '법인'];
+            // ADDED: '사업연도', '신고', '처리' to prevent lookahead from eating next line headers
+            const stopLabelsRaw = ['사업자', '등록번호', '대표이사', '대표자', '대표', '성명', '성함', '주소', '소재지', '본점', '거주지', '업태', '종목', '전화번호', '팩스', '주민', '법인', '사업연도', '신고', '처리'];
             // Create regex that matches any of these, allowing spaces (사 업 자)
             const stopLabelsPattern = stopLabelsRaw.map(l => l.split('').join('\\s*')).join('|');
             const stopLabelsRegex = new RegExp(`(?:${stopLabelsPattern})`, 'g');
 
             // Create flexible regexes (handle "사 업 자", "회사 명" etc.)
-            const nameLabels = entityLabelsRaw.map(l => ({
-                raw: l,
-                regex: new RegExp(l.split('').join('\\s*'), 'g') // 'g' flag essential for while(exec)
-            }));
+            // MODIFIED: Specific handling for "상호(법인명)", "성명(대표자)" to consume the suffix in the label match
+            const nameLabels = entityLabelsRaw.map(l => {
+                let suffix = '';
+                if (['상호', '업체명'].includes(l)) suffix = '(?:\\s*\\(?\\s*(?:법인명|회사명)\\s*\\)?)?';
+                if (['성명', '성함'].includes(l)) suffix = '(?:\\s*\\(?\\s*대표자\\s*\\)?)?';
+
+                return {
+                    raw: l,
+                    regex: new RegExp(l.split('').join('\\s*') + suffix, 'g')
+                };
+            });
 
             // Company/Name suffixes/prefixes
             const namePatterns = [
