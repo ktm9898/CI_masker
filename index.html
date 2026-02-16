@@ -1,0 +1,1499 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>재무제표 PDF/이미지 마스킹 도구</title>
+    <meta name="description" content="재무제표 PDF 및 이미지에서 업체명, 법인번호, 사업자번호를 자동으로 감지하여 검은색 박스로 마스킹하는 클라이언트 전용 도구">
+
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+        integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e"
+        crossorigin="anonymous"></script>
+    <!-- pdf-lib -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"
+        integrity="sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI"
+        crossorigin="anonymous"></script>
+    <!-- Tesseract.js for OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"
+        integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F"
+        crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&display=swap');
+
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-secondary: #111827;
+            --bg-card: rgba(17, 24, 39, 0.8);
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --radius: 16px;
+            --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans KR', 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Animated background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background:
+                radial-gradient(ellipse 80% 50% at 20% 40%, rgba(99, 102, 241, 0.12) 0%, transparent 50%),
+                radial-gradient(ellipse 60% 40% at 80% 20%, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse 50% 60% at 50% 90%, rgba(99, 102, 241, 0.08) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .app-container {
+            position: relative;
+            z-index: 1;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 32px 0;
+        }
+
+        .header-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            border-radius: 100px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            font-size: 12px;
+            color: var(--accent-secondary);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .header-badge .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        .header h1 {
+            font-size: 42px;
+            font-weight: 900;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 12px;
+            line-height: 1.2;
+        }
+
+        .header p {
+            font-size: 16px;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-badge">
+                <div class="dot"></div>
+                Safe & Secure
+            </div>
+            <h1>재무제표 PDF/이미지 마스킹 도구</h1>
+            <p>민감한 정보(사업자번호, 법인번호, 업체명 등)를 원천적으로 제거하여 안전하게 공유하세요.</p>
+            <div class="security-notice">🔒 모든 처리는 브라우저 내에서 수행됩니다. 데이터 완전 삭제(Sanitization) 기술을 사용하여 보이지 않는 텍스트 정보까지 안전하게
+                제거합니다. </div>
+        </header>
+
+        <!-- Upload Section -->
+        <div id="upload-section" class="card fade-in">
+            <div class="card-body">
+                <div class="upload-zone" id="upload-zone">
+                    <div class="upload-icon">📄</div>
+                    <h3>재무제표 파일을 업로드하세요</h3>
+                    <p>파일을 드래그 앤 드롭하거나 아래 버튼을 클릭하세요 (PDF, JPG, PNG 지원)</p>
+                    <div class="browse-btn">파일 선택</div>
+                </div>
+                <input type="file" id="file-input" accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.tif,.webp">
+            </div>
+        </div>
+
+        <!-- Status bar -->
+        <div id="status-bar" class="status-bar status-info hidden">
+            <div class="spinner"></div>
+            <span id="status-text">처리 중...</span>
+        </div>
+
+        <!-- Progress -->
+        <div id="progress-container" class="progress-container">
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-text" id="progress-text">분석 준비 중...</div>
+        </div>
+
+        <!-- Main Content -->
+        <div id="main-content" class="main-layout hidden">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <!-- File Info -->
+                <div class="card fade-in">
+                    <div class="card-header">
+                        <h2><span class="icon">📁</span>파일 정보</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="file-info">
+                            <div class="file-icon" id="file-icon-label">PDF</div>
+                            <div class="file-details">
+                                <div class="file-name" id="file-name">-</div>
+                                <div class="file-size" id="file-size">-</div>
+                            </div>
+                            <button class="file-remove" id="file-remove" title="파일 제거">✕</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detected Items -->
+                <div class="card fade-in">
+                    <div class="card-header">
+                        <h2><span class="icon">🔍</span>감지된 항목</h2>
+                        <span class="stat-badge" id="detected-count">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="select-actions">
+                            <button id="select-all-btn">전체 선택</button>
+                            <button id="deselect-all-btn">전체 해제</button>
+                        </div>
+                        <ul class="detected-list" id="detected-list">
+                            <li style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 14px;">
+                                감지된 항목이 없습니다</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Manual Input -->
+                <div class="card fade-in">
+                    <div class="card-header">
+                        <h2><span class="icon">✏️</span>수동 추가</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="manual-input-group">
+                            <input type="text" id="manual-input" placeholder="업체명 또는 번호 입력">
+                            <button id="manual-add-btn">추가</button>
+                        </div>
+                        <div class="info-tip">💡 자동 감지되지 않은 업체명이나 기타 마스킹할 텍스트를 수동으로 추가할 수 있습니다.</div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="mask-btn" disabled>🛡️ 마스킹 처리</button>
+                    <button class="btn btn-success hidden" id="download-btn">⬇️ 마스킹된 파일 다운로드</button>
+                    <button class="btn btn-secondary" id="reset-btn">🔄 새 파일 처리</button>
+                </div>
+            </div>
+
+            <!-- Preview -->
+            <div class="card fade-in">
+                <div class="card-header preview-header">
+                    <h2><span class="icon">👁️</span>미리보기</h2>
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <div class="toggle-group">
+                            <button id="view-original" class="active">원본</button>
+                            <button id="view-masked">마스킹</button>
+                        </div>
+                        <div class="page-nav">
+                            <button id="prev-page" disabled>◀</button>
+                            <span id="page-info">- / -</span>
+                            <button id="next-page" disabled>▶</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body preview-container">
+                    <div class="canvas-wrapper" id="canvas-wrapper">
+                        <div class="empty-state">
+                            <div class="empty-icon">📋</div>
+                            <p>파일을 업로드하면 미리보기가 표시됩니다</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize pdf.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // ============================================================
+        // State
+        // ============================================================
+        let pdfDoc = null; // pdf.js document
+        let pdfBytes = null; // raw ArrayBuffer of original PDF
+        let maskedPdfBytes = null; // ArrayBuffer of masked PDF
+        let currentPage = 1;
+        let totalPages = 0;
+        let detectedItems = []; // {id, type, value, checked, occurrences: [{page, x, y, w, h}]}
+        let viewMode = 'original'; // 'original' | 'masked'
+
+        let pageTextItems = {}
+
+            ; // cache: page -> textItems with positions
+        let fileType = null; // 'pdf' | 'image'
+        let originalImage = null; // HTMLImageElement for image mode
+        let maskedImageDataUrl = null; // data URL of masked image
+        let ocrWords = []; // Tesseract word-level results for image
+
+        // ============================================================
+        // DOM Elements
+        // ============================================================
+        const uploadSection = document.getElementById('upload-section');
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput = document.getElementById('file-input');
+        const statusBar = document.getElementById('status-bar');
+        const statusText = document.getElementById('status-text');
+        const progressContainer = document.getElementById('progress-container');
+        const progressFill = document.getElementById('progress-fill');
+        const progressTextEl = document.getElementById('progress-text');
+        const mainContent = document.getElementById('main-content');
+        const fileNameEl = document.getElementById('file-name');
+        const fileSizeEl = document.getElementById('file-size');
+        const detectedList = document.getElementById('detected-list');
+        const detectedCountEl = document.getElementById('detected-count');
+        const manualInput = document.getElementById('manual-input');
+        const maskBtn = document.getElementById('mask-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const canvasWrapper = document.getElementById('canvas-wrapper');
+        const pageInfoEl = document.getElementById('page-info');
+
+        // ============================================================
+        // Upload handlers
+        // ============================================================
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('drag-over');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('drag-over');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+
+            if (files.length > 0) {
+                const f = files[0];
+
+                if (f.type === 'application/pdf' || f.type.startsWith('image/')) {
+                    handleFile(f);
+                }
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        // ============================================================
+        // File handling
+        // ============================================================
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        async function handleFile(file) {
+            fileNameEl.textContent = file.name;
+            const ext = file.name.split('.').pop().toUpperCase();
+
+            if (file.type === 'application/pdf') {
+                fileType = 'pdf';
+                document.getElementById('file-icon-label').textContent = 'PDF';
+                document.getElementById('file-icon-label').style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+                fileSizeEl.textContent = formatFileSize(file.size) + ' · PDF';
+                await handlePdfFile(file);
+            }
+
+            else if (file.type.startsWith('image/')) {
+                fileType = 'image';
+                document.getElementById('file-icon-label').textContent = ext;
+                document.getElementById('file-icon-label').style.background = 'linear-gradient(135deg, #3b82f6, #2563eb)';
+                fileSizeEl.textContent = formatFileSize(file.size) + ' · ' + ext;
+                await handleImageFile(file);
+            }
+        }
+
+        async function handlePdfFile(file) {
+            showStatus('PDF 파일을 읽고 있습니다...', 'info');
+            showProgress(0, 'PDF 로딩 중...');
+
+            try {
+                pdfBytes = await file.arrayBuffer();
+                showProgress(20, 'PDF 파싱 중...');
+
+                const loadingTask = pdfjsLib.getDocument({
+                    data: pdfBytes.slice(0)
+                });
+                pdfDoc = await loadingTask.promise;
+
+                // Render first page for preview
+                originalPdfBytes = pdfBytes;
+                totalPages = pdfDoc.numPages;
+                currentPage = 1;
+                await renderPage(currentPage);
+
+                showProgress(30, '텍스트 추출 중...');
+                await extractAllText();
+
+                // Check if text was found. If not, try OCR.
+                let hasText = false;
+
+                for (let p = 1; p <= totalPages; p++) {
+                    if (pageTextItems[p] && pageTextItems[p].length > 10) {
+                        // Threshold > 10 items
+                        hasText = true;
+                        break;
+                    }
+                }
+
+                if (!hasText) {
+                    if (confirm('텍스트 레이어가 없는 PDF(스캔본 등)로 보입니다. 이미지 인식(OCR)을 수행하시겠습니까?\n(시간이 조금 더 걸릴 수 있습니다)')) {
+                        await performPdfOcr();
+                    }
+                }
+
+                showProgress(85, '패턴 분석 중...');
+                detectPatterns(); // Now detect patterns on extracted (or OCR'd) text
+
+                showProgress(100, '분석 완료!');
+
+                setTimeout(() => {
+                    uploadSection.classList.add('hidden');
+                    progressContainer.classList.remove('active');
+                    mainContent.classList.remove('hidden');
+                    renderDetectedList();
+                    renderPage();
+                    hideStatus();
+                }
+
+                    , 500);
+
+            }
+
+            catch (err) {
+                console.error('PDF 처리 오류:', err);
+                showStatus('PDF 파일을 처리하는 중 오류가 발생했습니다: ' + err.message, 'warning');
+                progressContainer.classList.remove('active');
+            }
+        }
+
+        async function performPdfOcr() {
+            showProgress(40, 'PDF OCR 변환 준비 중...');
+
+            pageTextItems = {}
+
+                ; // Reset items
+
+            for (let p = 1; p <= totalPages; p++) {
+                showProgress(40 + Math.round((p / totalPages) * 40), `페이지 ${p}/${totalPages} OCR 인식 중...`);
+
+                const page = await pdfDoc.getPage(p);
+
+                const viewport = page.getViewport({
+                    scale: 2.0
+                }); // High res for OCR
+
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+
+                // Run Tesseract
+                const result = await Tesseract.recognize(canvas, 'kor+eng');
+                const words = result.data.words || [];
+
+                // Map back to PDF point coordinates (scale 1.0)
+                const pdfViewport = page.getViewport({
+                    scale: 1.0
+                });
+                const pdfHeight = pdfViewport.height;
+                const scaleUsed = 2.0;
+
+                pageTextItems[p] = words.map(w => ({
+                    str: (w.text || '').normalize('NFC'),
+                    x: w.bbox.x0 / scaleUsed,
+                    y: pdfHeight - (w.bbox.y1 / scaleUsed), // Flip Y for PDF coordinate system
+                    width: (w.bbox.x1 - w.bbox.x0) / scaleUsed,
+                    height: (w.bbox.y1 - w.bbox.y0) / scaleUsed,
+                    pageHeight: pdfHeight,
+                    pageWidth: pdfViewport.width
+                }));
+            }
+        }
+
+        // ============================================================
+        // Image file handling with Tesseract.js OCR
+        // ============================================================
+        async function handleImageFile(file) {
+            showStatus('이미지를 읽고 있습니다...', 'info');
+            showProgress(0, '이미지 로딩 중...');
+
+            try {
+                // Load image
+                const imgUrl = URL.createObjectURL(file);
+                originalImage = new Image();
+
+                await new Promise((resolve, reject) => {
+                    originalImage.onload = resolve;
+                    originalImage.onerror = reject;
+                    originalImage.src = imgUrl;
+                });
+
+                totalPages = 1;
+                currentPage = 1;
+
+                // Pre-process image for better OCR: Upscale and Grayscale
+                const scaleFactor = originalImage.naturalWidth < 3000 ? 2.5 : 1.5; // Aggressive scaling for small images
+                const preprocessCanvas = document.createElement('canvas');
+                preprocessCanvas.width = originalImage.naturalWidth * scaleFactor;
+                preprocessCanvas.height = originalImage.naturalHeight * scaleFactor;
+                const pCtx = preprocessCanvas.getContext('2d');
+                pCtx.drawImage(originalImage, 0, 0, preprocessCanvas.width, preprocessCanvas.height);
+
+                // Optional: Convert to grayscale (simple average)
+                const imgData = pCtx.getImageData(0, 0, preprocessCanvas.width, preprocessCanvas.height);
+                const data = imgData.data;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                    data[i] = avg; // R
+                    data[i + 1] = avg; // G
+                    data[i + 2] = avg; // B
+                }
+
+                pCtx.putImageData(imgData, 0, 0);
+
+                showProgress(10, 'OCR 엔진 초기화 및 이미지 전처리 중...');
+
+                // Run Tesseract OCR on processed canvas
+                const result = await Tesseract.recognize(preprocessCanvas, 'kor+eng', {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            const pct = 10 + Math.round((m.progress || 0) * 70);
+
+                            showProgress(pct, `텍스트 인식 중... (${Math.round((m.progress || 0) * 100)}%)`);
+                        }
+                    }
+                });
+                ocrWords = result.data.words || [];
+                console.warn('OCR Found Words:', ocrWords.length);
+
+                if (ocrWords.length > 0) {
+                    console.log('First 5 words:', ocrWords.slice(0, 5).map(w => w.text));
+                }
+
+                else {
+                    alert('OCR 결과가 없습니다. 이미지가 너무 작거나 텍스트가 명확하지 않습니다.');
+                }
+
+                // Convert OCR results to our text item format for reuse of detection logic
+                const imgW = originalImage.naturalWidth;
+                const imgH = originalImage.naturalHeight;
+
+                pageTextItems = {}
+
+                    ;
+
+                pageTextItems[1] = ocrWords.map(w => ({
+                    str: (w.text || '').normalize('NFC'),
+                    x: w.bbox.x0 / scaleFactor,
+                    y: imgH - (w.bbox.y1 / scaleFactor), // convert to bottom-left origin relative to original H
+                    width: (w.bbox.x1 - w.bbox.x0) / scaleFactor,
+                    height: (w.bbox.y1 - w.bbox.y0) / scaleFactor,
+                    pageHeight: imgH,
+                    pageWidth: imgW
+                }));
+
+                showProgress(85, '패턴 분석 중...');
+                detectPatterns();
+
+                showProgress(100, '분석 완료!');
+
+                setTimeout(() => {
+                    uploadSection.classList.add('hidden');
+                    progressContainer.classList.remove('active');
+                    mainContent.classList.remove('hidden');
+                    // Hide page nav for single image
+                    document.querySelector('.page-nav').style.display = 'none';
+                    renderDetectedList();
+                    renderPage();
+                    hideStatus();
+                }
+
+                    , 500);
+
+            }
+
+            catch (err) {
+                console.error('이미지 처리 오류:', err);
+                showStatus('이미지를 처리하는 중 오류가 발생했습니다: ' + err.message, 'warning');
+                progressContainer.classList.remove('active');
+            }
+        }
+
+        // ============================================================
+        // Text extraction with positions
+        // ============================================================
+        async function extractAllText() {
+            pageTextItems = {}
+
+                ;
+
+            for (let p = 1; p <= totalPages; p++) {
+                const page = await pdfDoc.getPage(p);
+                const textContent = await page.getTextContent();
+
+                const viewport = page.getViewport({
+                    scale: 1.0
+                });
+
+                const items = textContent.items.map(item => {
+                    const tx = item.transform;
+
+                    // PDF coordinate system: origin at bottom-left
+                    // tx[4] = x, tx[5] = y (from bottom)
+                    return {
+                        str: (item.str || '').normalize('NFC'),
+                        x: tx[4],
+                        y: tx[5],
+                        width: item.width,
+                        height: item.height || Math.abs(tx[3]) || 12,
+                        fontName: item.fontName,
+                        pageHeight: viewport.height,
+                        pageWidth: viewport.width
+                    }
+
+                        ;
+                });
+
+                pageTextItems[p] = items;
+
+                const pct = 40 + (p / totalPages) * 35;
+
+                showProgress(pct, `텍스트 추출 중... (${p}/${totalPages} 페이지)`);
+            }
+        }
+
+        // ============================================================
+        // Pattern detection
+        // ============================================================
+        function detectPatterns() {
+            detectedItems = [];
+            let idCounter = 0;
+
+            // Regex patterns
+            const patterns = [
+                {
+                    type: 'business',
+                    label: '사업자등록번호',
+                    regex: /\d{3}-\d{2}-\d{5}/g
+                },
+                {
+                    type: 'corporate',
+                    label: '법인등록번호',
+                    regex: /\d{6}-\d{7}/g
+                }
+            ];
+
+            // Search through all pages
+            for (let p = 1; p <= totalPages; p++) {
+                const items = pageTextItems[p];
+                if (!items) continue;
+
+                // Build full page text for regex matching & line-based matching
+                // We link index ranges to text items for position lookup
+                const fullText = items.map(it => it.str).join('');
+
+                // -- Regex-based detection (business/corporate numbers) --
+                for (const pattern of patterns) {
+                    let match;
+                    pattern.regex.lastIndex = 0;
+
+                    // Also search line-by-line by combining adjacent items
+                    const lineText = buildPageLines(items);
+
+                    for (const line of lineText) {
+                        pattern.regex.lastIndex = 0;
+
+                        while ((match = pattern.regex.exec(line.text)) !== null) {
+                            const value = match[0];
+
+                            // Check if already detected
+                            const existing = detectedItems.find(d => d.value === value && d.type === pattern.type);
+
+                            // Find text items that contain this match
+                            const occurrences = findTextItemPositions(items, value, p);
+
+                            if (existing) {
+                                existing.occurrences.push(...occurrences);
+                            }
+
+                            else {
+                                detectedItems.push({
+                                    id: idCounter++,
+                                    type: pattern.type,
+                                    label: pattern.label,
+                                    value: value,
+                                    checked: true,
+                                    occurrences: occurrences
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // -- Company name detection --
+                detectCompanyNames(items, p, idCounter);
+                idCounter = detectedItems.length;
+            }
+        }
+
+        function buildPageLines(items) {
+            // Group text items into lines based on Y coordinate
+            const lines = [];
+
+            let currentLine = {
+                text: '', items: [], y: null
+            };
+
+            // Adjust tolerance based on file type / page height
+            // For Image (usually high res), use larger tolerance to handle OCR jitter/slant. 
+            // pdf-masker uses global 'fileType' variable.
+            const tolerance = (typeof fileType !== 'undefined' && fileType === 'image') ? 15 : 3;
+
+            for (const item of items) {
+                if (currentLine.y === null || Math.abs(item.y - currentLine.y) > tolerance) {
+                    if (currentLine.text) {
+
+                        // Debug log for checking what lines are built
+                        // console.log('Built line:', currentLine.text); 
+                        lines.push({
+                            ...currentLine
+                        });
+                    }
+
+                    currentLine = {
+                        text: item.str, items: [item], y: item.y
+                    };
+                }
+
+                else {
+                    // Start new line if horizontal distance is huge (e.g. separate columns that shouldn't merge?)
+                    // But we handle column separation in detectCompanyNames logic now.
+                    // Just append.
+                    currentLine.text += item.str;
+                    currentLine.items.push(item);
+                }
+            }
+
+            if (currentLine.text) lines.push({
+                ...currentLine
+            });
+            return lines;
+        }
+
+        function detectCompanyNames(items, page, idCounter) {
+            const lines = buildPageLines(items);
+
+            // Labels that precede company names (converted to flexible regex to handle spaces)
+            const nameLabelsRaw = ['상호',
+                '회사명',
+                '법인명',
+                '업체명',
+                '사업자',
+                '대표자',
+                '성명'];
+
+            // Create regexes like /회\s*사\s*명/
+            const nameLabels = nameLabelsRaw.map(l => ({
+                raw: l,
+                regex: new RegExp(l.split('').join('\\s*'))
+            }));
+
+            // Company suffixes/prefixes
+            const companyPatterns = [/\(주\)/g,
+                /주식회사/g,
+                /㈜/g,
+                /유한회사/g,
+                /유한공사/g,
+                /합명회사/g,
+                /합자회사/g];
+
+            function attemptLabelDetection(text) {
+                for (const labelObj of nameLabels) {
+                    const match = labelObj.regex.exec(text);
+
+                    if (match) {
+                        const idx = match.index;
+                        const matchedLabel = match[0];
+
+                        let afterLabel = text.substring(idx + matchedLabel.length).trim();
+                        afterLabel = afterLabel.replace(/^[\s:：\-\|]+/, '').trim();
+                        // Remove (단위:...) suffix
+                        afterLabel = afterLabel.replace(/\(단위\s*[:：].*\)$/i, '').trim();
+
+                        const splitBySpace = afterLabel.split(/\s{2,}/);
+                        if (splitBySpace.length > 0) {
+                            afterLabel = splitBySpace[0].trim();
+                        }
+
+                        if (afterLabel.length >= 2 && afterLabel.length <= 30) {
+                            if (!/^\d{3}-\d{2}-\d{5}$/.test(afterLabel) && !/^\d{6}-\d{7}$/.test(afterLabel)) {
+                                const existing = detectedItems.find(d => d.type === 'company' && d.value === afterLabel);
+                                const occurrences = findTextItemPositions(items, afterLabel, page);
+
+                                if (existing) {
+                                    existing.occurrences.push(...occurrences);
+                                }
+                                else if (occurrences.length > 0) {
+                                    console.log('Detected company:', afterLabel);
+                                    detectedItems.push({
+                                        id: detectedItems.length,
+                                        type: 'company',
+                                        label: '업체명',
+                                        value: afterLabel,
+                                        checked: true,
+                                        occurrences: occurrences
+                                    });
+                                }
+                                return true; // Match found
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const text = (line.text || '').normalize('NFC');
+
+                // 1. Try single line detection
+                let found = attemptLabelDetection(text);
+
+                // 2. Try detection with next line (handle split label)
+                if (!found && i < lines.length - 1) {
+                    const nextLine = lines[i + 1];
+                    const nextText = (nextLine.text || '').normalize('NFC');
+                    // Simple join. If label is "회사" (line i) and "명: 우림" (line i+1), join is "회사명: 우림"
+                    found = attemptLabelDetection(text + nextText);
+                }
+            }
+
+            // Check for company pattern-based detection
+            for (const line of lines) {
+
+                // Re-iterate for pattern-based detection
+                // Check for company pattern-based detection
+                for (const pattern of companyPatterns) {
+                    pattern.lastIndex = 0;
+
+                    if (pattern.test(line.text)) {
+                        // Extract the company name including the pattern
+                        const text = line.text.trim();
+                        // Attempt to grab the full company name (e.g., "주식회사 ABC" or "ABC(주)")
+                        const companyRegexes = [ // Prefix: 주식회사 ABC, (주)ABC
+                            /(?:주식회사|㈜)\s*[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF\w\s]+/g,
+                            // Suffix (Short): ABC(주), ABC㈜
+                            /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF\w\s]+\s*(?:\(주\)|㈜)/g,
+                            // Suffix (Long): ABC주식회사, ABC유한회사...
+                            /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF\w\s]+\s*(?:주식회사|유한회사|합명회사|합자회사|유한책임회사)/g];
+
+                        for (const cr of companyRegexes) {
+                            cr.lastIndex = 0;
+                            let m;
+
+                            while ((m = cr.exec(text)) !== null) {
+                                const companyName = m[0].trim();
+
+                                if (companyName.length >= 2) {
+                                    const existing = detectedItems.find(d => d.type === 'company' && d.value === companyName);
+
+                                    const occurrences = findTextItemPositions(items, companyName, page);
+
+                                    if (existing) {
+                                        existing.occurrences.push(...occurrences);
+                                    }
+
+                                    else if (occurrences.length > 0) {
+                                        detectedItems.push({
+                                            id: detectedItems.length,
+                                            type: 'company',
+                                            label: '업체명',
+                                            value: companyName,
+                                            checked: true,
+                                            occurrences: occurrences
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function findTextItemPositions(items, searchValue, page) {
+            const occurrences = [];
+
+            // Strategy 1: Direct match within single text items
+            for (const item of items) {
+                const idx = item.str.indexOf(searchValue);
+
+                if (idx !== -1) {
+                    // Estimate position within the text item
+                    const charRatio = item.str.length > 0 ? item.width / item.str.length : 0;
+
+                    occurrences.push({
+                        page: page,
+                        x: item.x + (idx * charRatio),
+                        y: item.y,
+                        w: searchValue.length * charRatio,
+                        h: item.height,
+                        pageHeight: item.pageHeight,
+                        pageWidth: item.pageWidth
+                    });
+                }
+            }
+
+            // Strategy 2: Match across adjacent items (on same line)
+            if (occurrences.length === 0) {
+                const lines = buildPageLines(items);
+
+                for (const line of lines) {
+                    const idx = line.text.indexOf(searchValue);
+
+                    if (idx !== -1 && line.items.length > 0) {
+                        // Find spanning items
+                        let charCount = 0;
+                        let startItem = null;
+                        let endItem = null;
+
+                        for (const li of line.items) {
+                            const itemEnd = charCount + li.str.length;
+
+                            if (!startItem && itemEnd > idx) {
+                                startItem = li;
+                            }
+
+                            if (startItem && charCount < idx + searchValue.length) {
+                                endItem = li;
+                            }
+
+                            charCount = itemEnd;
+                        }
+
+                        if (startItem && endItem) {
+                            const x = startItem.x;
+                            const w = (endItem.x + endItem.width) - startItem.x;
+
+                            occurrences.push({
+                                page: page,
+                                x: x,
+                                y: startItem.y,
+                                w: Math.max(w, searchValue.length * 6),
+                                h: startItem.height,
+                                pageHeight: startItem.pageHeight,
+                                pageWidth: startItem.pageWidth
+                            });
+                        }
+                    }
+                }
+            }
+
+            return occurrences;
+        }
+
+        // ============================================================
+        // Add manual text for masking
+        // ============================================================
+        function addManualItem(value) {
+            value = value.trim();
+            if (!value) return;
+
+            // Check if already exists
+            if (detectedItems.find(d => d.value === value)) {
+                alert('이미 추가된 항목입니다.');
+                return;
+            }
+
+            // Determine type
+            let type = 'company';
+            let label = '수동 입력';
+
+            if (/^\d{3}-\d{2}-\d{5}$/.test(value)) {
+                type = 'business';
+                label = '사업자등록번호';
+            }
+            else if (/^\d{6}-\d{7}$/.test(value)) {
+                type = 'corporate';
+                label = '법인등록번호';
+            }
+
+            // Find occurrences across all pages
+            let allOccurrences = [];
+
+            for (let p = 1; p <= totalPages; p++) {
+                const items = pageTextItems[p];
+
+                if (items) {
+                    const occ = findTextItemPositions(items, value, p);
+                    allOccurrences.push(...occ);
+                }
+            }
+
+            detectedItems.push({
+                id: detectedItems.length,
+                type: type,
+                label: label,
+                value: value,
+                checked: true,
+                occurrences: allOccurrences,
+                manual: true
+            });
+
+            renderDetectedList();
+            manualInput.value = '';
+
+            if (allOccurrences.length === 0) {
+                alert(`"${value}" 텍스트를 PDF에서 찾을 수 없습니다.\n정확한 텍스트를 입력해주세요.`);
+            }
+        }
+
+        // ============================================================
+        // Render detected items list
+        // ============================================================
+        function renderDetectedList() {
+            const checkedCount = detectedItems.filter(d => d.checked).length;
+            detectedCountEl.textContent = detectedItems.length;
+            maskBtn.disabled = checkedCount === 0;
+
+            if (detectedItems.length === 0) {
+                detectedList.innerHTML = ` <li style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 14px;">감지된 항목이 없습니다.<br>수동으로 추가하세요. </li>`;
+                return;
+            }
+
+            detectedList.innerHTML = detectedItems.map(item => {
+                const typeClass = item.type === 'business' ? 'type-business' : item.type === 'corporate' ? 'type-corporate' : 'type-company';
+                const occCount = item.occurrences.length;
+
+                return `
+                    <li class="detected-item" data-id="${item.id}">
+                        <input type="checkbox" ${item.checked ? 'checked' : ''} data-id="${item.id}">
+                        <div class="item-info">
+                            <span class="item-type ${typeClass}">${item.label}</span>
+                            <div class="item-value">${escapeHtml(item.value)}</div>
+                            <div class="item-page">${occCount}개 위치 감지됨${item.manual ? ' · 수동 추가' : ''}</div>
+                        </div>
+                    </li>`;
+            }).join('');
+
+            // Attach event listeners
+            detectedList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', (e) => {
+                    const id = parseInt(e.target.dataset.id);
+                    const item = detectedItems.find(d => d.id === id);
+                    if (item) item.checked = e.target.checked;
+                    const count = detectedItems.filter(d => d.checked).length;
+                    maskBtn.disabled = count === 0;
+                });
+            });
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ============================================================
+        // PDF preview rendering
+        // ============================================================
+        async function renderPage() {
+            if (fileType === 'pdf') {
+                if (!pdfDoc) return;
+
+                const pageNum = currentPage;
+                let docToRender = pdfDoc;
+
+                if (viewMode === 'masked' && maskedPdfBytes) {
+                    const maskedDoc = await pdfjsLib.getDocument({
+                        data: maskedPdfBytes.slice(0)
+                    }).promise;
+                    docToRender = maskedDoc;
+                }
+
+                const page = await docToRender.getPage(pageNum);
+                const scale = 1.5;
+
+                const viewport = page.getViewport({
+                    scale
+                });
+
+                const canvas = document.createElement('canvas');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                const ctx = canvas.getContext('2d');
+
+                await page.render({
+                    canvasContext: ctx, viewport
+                }).promise;
+
+                // Draw detection boxes only in original view
+                if (viewMode === 'original') {
+                    drawDetectionBoxes(ctx, scale, pageNum);
+                }
+
+                canvasWrapper.innerHTML = '';
+                canvasWrapper.appendChild(canvas);
+
+                pageInfoEl.textContent = `${pageNum} / ${totalPages}`;
+                document.getElementById('prev-page').disabled = pageNum <= 1;
+                document.getElementById('next-page').disabled = pageNum >= totalPages;
+
+            }
+
+            else if (fileType === 'image') {
+                if (!originalImage) return;
+
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+
+                if (viewMode === 'masked' && maskedImageDataUrl) {
+                    const img = new Image();
+
+                    await new Promise(r => {
+                        img.onload = r; img.src = maskedImageDataUrl;
+                    });
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                }
+
+                else {
+                    canvas.width = originalImage.naturalWidth;
+                    canvas.height = originalImage.naturalHeight;
+                    ctx.drawImage(originalImage, 0, 0);
+
+                    if (viewMode === 'original') {
+                        drawDetectionBoxes(ctx, 1, 1);
+                    }
+                }
+
+                // Scale down for preview if too large
+                if (canvas.width > 800) {
+                    canvas.style.maxWidth = '100%';
+                    canvas.style.height = 'auto';
+                }
+
+                canvasWrapper.innerHTML = '';
+                canvasWrapper.appendChild(canvas);
+
+                pageInfoEl.textContent = '1 / 1';
+                document.getElementById('prev-page').disabled = true;
+                document.getElementById('next-page').disabled = true;
+            }
+        }
+
+        function drawDetectionBoxes(ctx, scale, pageNum) {
+            const checkedItems = detectedItems.filter(d => d.checked);
+
+            for (const item of checkedItems) {
+                for (const occ of item.occurrences) {
+                    if (occ.page === pageNum) {
+                        // For PDF: y is from bottom (needs flip), for Image: y is from top (already flipped in handleImageFile)
+                        let canvasY;
+
+                        if (fileType === 'pdf') {
+                            canvasY = (occ.pageHeight - occ.y - occ.h) * scale;
+                        }
+
+                        else {
+                            // Image y is stored as bottom-up (like PDF) to reuse detection logic
+                            // Convert back to top-down for canvas
+                            canvasY = (occ.pageHeight - occ.y - occ.h) * scale;
+                        }
+
+                        const canvasX = occ.x * scale;
+                        const canvasW = occ.w * scale;
+                        const canvasH = (occ.h + 4) * scale; // Add some padding
+
+                        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+                        ctx.fillRect(canvasX, canvasY, canvasW, canvasH);
+                        ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
+                        ctx.lineWidth = 2 * (fileType === 'image' ? 3 : 1); // Thicker for high-res images
+                        ctx.strokeRect(canvasX, canvasY, canvasW, canvasH);
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // Masking with pdf-lib
+        // ============================================================
+        async function performMasking() {
+            const checkedItems = detectedItems.filter(d => d.checked);
+            if (checkedItems.length === 0) return;
+
+            showStatus('마스킹 처리 중...', 'info');
+            maskBtn.disabled = true;
+
+            try {
+                if (fileType === 'pdf') {
+                    const {
+                        PDFDocument
+                    }
+
+                        = PDFLib;
+                    const flattenedPdfDoc = await PDFDocument.create();
+
+                    // Group occurrences by page
+                    const pageMasks = {}
+
+                        ;
+
+                    for (const item of checkedItems) {
+                        for (const occ of item.occurrences) {
+                            if (!pageMasks[occ.page]) pageMasks[occ.page] = [];
+                            pageMasks[occ.page].push(occ);
+                        }
+                    }
+
+                    for (let p = 1; p <= totalPages; p++) {
+                        showProgress(Math.round((p / totalPages) * 100), `보안 마스킹 처리 중... (${p}/${totalPages} 페이지)`);
+
+                        // 1. Render original page to canvas (High resolution)
+                        const page = await pdfDoc.getPage(p);
+                        const scale = 2.0;
+
+                        const viewport = page.getViewport({
+                            scale
+                        });
+
+                        const canvas = document.createElement('canvas');
+                        canvas.width = viewport.width;
+                        canvas.height = viewport.height;
+                        const ctx = canvas.getContext('2d');
+
+                        await page.render({
+                            canvasContext: ctx, viewport
+                        }).promise;
+
+                        // 2. Draw masks on canvas (Pixels are permanently overwritten)
+                        const masks = pageMasks[p] || [];
+                        ctx.fillStyle = '#000000';
+
+                        for (const occ of masks) {
+                            const padding = 1;
+                            const x = (occ.x - padding) * scale;
+                            const y = (occ.pageHeight - (occ.y + occ.h + padding)) * scale;
+                            const w = (occ.w + padding * 2) * scale;
+                            const h = (occ.h + padding * 2) * scale;
+                            ctx.fillRect(x, y, w, h);
+                        }
+
+                        // 3. Convert to JPEG and Embed
+                        const imgDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                        const imgBytes = await fetch(imgDataUrl).then(res => res.arrayBuffer());
+                        const pdfImg = await flattenedPdfDoc.embedJpg(imgBytes);
+
+                        // 4. Add to new PDF with matching dimensions
+                        const originalViewport = page.getViewport({
+                            scale: 1.0
+                        });
+                        const newPage = flattenedPdfDoc.addPage([originalViewport.width, originalViewport.height]);
+
+                        newPage.drawImage(pdfImg, {
+                            x: 0,
+                            y: 0,
+                            width: originalViewport.width,
+                            height: originalViewport.height
+                        });
+                    }
+
+                    maskedPdfBytes = await flattenedPdfDoc.save();
+                    showProgress(100, '마스킹 완료!');
+                    setTimeout(() => progressContainer.classList.remove('active'), 1000);
+
+                }
+
+                else if (fileType === 'image') {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = originalImage.naturalWidth;
+                    canvas.height = originalImage.naturalHeight;
+                    const ctx = canvas.getContext('2d');
+
+                    // Draw original
+                    ctx.drawImage(originalImage, 0, 0);
+
+                    // Draw black boxes
+                    ctx.fillStyle = '#000000';
+
+                    for (const item of checkedItems) {
+                        for (const occ of item.occurrences) {
+                            // Convert bottom-up coordinates back to top-down for canvas
+                            // y_top = H - (y_bottom + h)
+                            // But wait, my render logic uses (H - y - h). y is bottom-left y. 
+                            // occ.y in handleImageFile was: imgH - w.bbox.y1. 
+                            // bbox.y1 is the bottom y in top-down. 
+                            // So occ.y is the distance from bottom to bottom of text.
+                            // occ.h is height.
+                            // So distance from bottom to top of text is occ.y + occ.h.
+                            // y_top_canvas = H - (occ.y + occ.h)
+
+                            const x = occ.x;
+                            const y = occ.pageHeight - occ.y - occ.h;
+                            const w = occ.w;
+                            const h = occ.h;
+                            const padding = 2; // small padding
+
+                            ctx.fillRect(x - padding, y - padding, w + padding * 2, h + padding * 2);
+                        }
+                    }
+
+                    maskedImageDataUrl = canvas.toDataURL(originalImage.src.startsWith('data:image/png') ? 'image/png' : 'image/jpeg');
+                }
+
+                // Switch to masked view
+                viewMode = 'masked';
+                document.getElementById('view-original').classList.remove('active');
+                document.getElementById('view-masked').classList.add('active');
+
+                await renderPage();
+
+                downloadBtn.classList.remove('hidden');
+                showStatus('마스킹 완료! 결과를 확인하고 다운로드하세요.', 'success');
+                maskBtn.disabled = false;
+
+            }
+
+            catch (err) {
+                console.error('마스킹 오류:', err);
+                showStatus('마스킹 처리 중 오류가 발생했습니다: ' + err.message, 'warning');
+                maskBtn.disabled = false;
+            }
+        }
+
+        // ============================================================
+        // Download masked PDF
+        // ============================================================
+        function downloadMaskedPdf() {
+            const originalName = fileNameEl.textContent;
+            const nameWithoutExt = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
+
+            if (fileType === 'pdf' && maskedPdfBytes) {
+                const blob = new Blob([maskedPdfBytes], {
+                    type: 'application/pdf'
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+
+                a.download = `${nameWithoutExt}_masked.pdf`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+
+            else if (fileType === 'image' && maskedImageDataUrl) {
+                const a = document.createElement('a');
+                a.href = maskedImageDataUrl;
+                // Get extension from original file or default to png
+                const ext = originalName.split('.').pop().toLowerCase();
+
+                a.download = `${nameWithoutExt}_masked.${ext === 'jpg' || ext === 'jpeg' ? 'jpg' : 'png'}`;
+                a.click();
+            }
+        }
+
+        // ============================================================
+        // UI Helpers
+        // ============================================================
+        function showStatus(text, type) {
+            statusBar.className = `status-bar status-${type}`;
+            statusBar.classList.remove('hidden');
+            statusText.textContent = text;
+
+            if (type !== 'info') {
+                // Remove spinner for non-info
+                const spinner = statusBar.querySelector('.spinner');
+                if (spinner) spinner.style.display = type === 'info' ? 'block' : 'none';
+            }
+        }
+
+        function hideStatus() {
+            statusBar.classList.add('hidden');
+        }
+
+        function showProgress(pct, text) {
+            progressContainer.classList.add('active');
+            progressFill.style.width = pct + '%';
+            progressTextEl.textContent = text;
+        }
+
+        function resetAll() {
+            pdfDoc = null;
+            pdfBytes = null;
+            maskedPdfBytes = null;
+            currentPage = 1;
+            totalPages = 0;
+            detectedItems = [];
+            viewMode = 'original';
+
+            pageTextItems = {}
+
+                ;
+
+            fileType = null;
+            originalImage = null;
+            maskedImageDataUrl = null;
+            ocrWords = [];
+
+            mainContent.classList.add('hidden');
+            uploadSection.classList.remove('hidden');
+            downloadBtn.classList.add('hidden');
+            hideStatus();
+
+            document.getElementById('view-original').classList.add('active');
+            document.getElementById('view-masked').classList.remove('active');
+
+            fileInput.value = '';
+            canvasWrapper.innerHTML = ` <div class="empty-state"><div class="empty-icon">📋</div><p>PDF를 업로드하면 미리보기가 표시됩니다</p></div>`;
+        }
+
+        // ============================================================
+        // Event Listeners
+        // ============================================================
+        maskBtn.addEventListener('click', performMasking);
+        downloadBtn.addEventListener('click', downloadMaskedPdf);
+        document.getElementById('reset-btn').addEventListener('click', resetAll);
+        document.getElementById('file-remove').addEventListener('click', resetAll);
+
+        document.getElementById('manual-add-btn').addEventListener('click', () => {
+            addManualItem(manualInput.value);
+        });
+
+        manualInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addManualItem(manualInput.value);
+        });
+
+        document.getElementById('prev-page').addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--; renderPage();
+            }
+        });
+
+        document.getElementById('next-page').addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage++; renderPage();
+            }
+        });
+
+        document.getElementById('view-original').addEventListener('click', () => {
+            viewMode = 'original';
+            document.getElementById('view-original').classList.add('active');
+            document.getElementById('view-masked').classList.remove('active');
+            renderPage();
+        });
+
+        document.getElementById('view-masked').addEventListener('click', () => {
+            if (!maskedPdfBytes) {
+                alert('먼저 마스킹 처리를 실행하세요.');
+                return;
+            }
+
+            viewMode = 'masked';
+            document.getElementById('view-masked').classList.add('active');
+            document.getElementById('view-original').classList.remove('active');
+            renderPage();
+        });
+
+        document.getElementById('select-all-btn').addEventListener('click', () => {
+            detectedItems.forEach(d => d.checked = true);
+            renderDetectedList();
+        });
+
+        document.getElementById('deselect-all-btn').addEventListener('click', () => {
+            detectedItems.forEach(d => d.checked = false);
+            renderDetectedList();
+        });
+    </script>
+</body>
+
+</html>
