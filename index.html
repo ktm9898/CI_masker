@@ -1273,6 +1273,11 @@
                     type: 'corporate',
                     label: '법인등록번호',
                     regex: /\d{6}-\d{7}/g
+                },
+                {
+                    type: 'resident',
+                    label: '주민등록번호',
+                    regex: /\d{6}[- ][1-4]\d{6}/g
                 }
             ];
 
@@ -1300,7 +1305,7 @@
                             const value = match[0];
 
                             // Check if already detected
-                            const existing = detectedItems.find(d => d.value === value && d.type === pattern.type);
+                            const existing = detectedItems.find(d => d.value === value && (d.type === pattern.type || ((pattern.type === 'resident' || pattern.type === 'corporate') && (d.type === 'resident' || d.type === 'corporate'))));
 
                             // Find text items that contain this match
                             const occurrences = findTextItemPositions(items, value, p);
@@ -1392,7 +1397,9 @@
 
             // Labels to remove from start
             const removeLabelsRaw = ['법인명', '상호', '대표자', '대표이사', '성명', '등록번호', '주민등록번호', '법인등록번호', '본점', '주소', '소재지', '거주지'];
-            const removeLabelsRegex = new RegExp(`^[\\(\\[\\{]?(?:${removeLabelsRaw.map(l => l.split('').join('\\s*')).join('|')})[\\)\\]\\}]?\\s*`);
+            // IMPROVED REGEX: Handle spaces inside brackets e.g. ( 본 점 )
+            // Constructs: ^ [([{]? \s* (label chars spaced) [)]}? \s*
+            const removeLabelsRegex = new RegExp(`^[\\(\\[\\{]?\\s*(?:${removeLabelsRaw.map(l => l.split('').join('\\s*')).join('|')})[\\)\\]\\}]?\\s*`);
 
             // Iteratively clean identifying prefixes
             while (true) {
@@ -1419,7 +1426,8 @@
             const nameLabelsRaw = ['상호', '회사명', '법인명', '업체명', '사업자', '대표자', '성명', '주민등록번호', '법인등록번호', '등록번호'];
 
             // Stop Labels: Flexible regex
-            const stopLabelsRaw = ['사업자', '등록번호', '대표자', '성명', '주소', '소재지', '본점', '거주지', '업태', '종목', '전화번호', '팩스'];
+            // ADDED: '주민', '법인' to catch '주민(법인)등록번호' start
+            const stopLabelsRaw = ['사업자', '등록번호', '대표자', '성명', '주소', '소재지', '본점', '거주지', '업태', '종목', '전화번호', '팩스', '주민', '법인'];
             // Create regex that matches any of these, allowing spaces (사 업 자)
             const stopLabelsPattern = stopLabelsRaw.map(l => l.split('').join('\\s*')).join('|');
             const stopLabelsRegex = new RegExp(`(?:${stopLabelsPattern})`, 'g');
