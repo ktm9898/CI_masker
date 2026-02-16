@@ -1033,12 +1033,16 @@
                     uploadSection.classList.add('hidden');
                     progressContainer.classList.remove('active');
                     mainContent.classList.remove('hidden');
+
+                    // Show page nav for PDF
+                    document.querySelector('.page-nav').style.display = 'flex';
+
                     renderDetectedList();
                     renderPage();
                     hideStatus();
-                }
+                }, 500);
 
-                    , 500);
+
 
             }
 
@@ -1321,6 +1325,10 @@
 
                 // -- Company name detection --
                 detectCompanyNames(items, p, idCounter);
+
+                // -- Address detection --
+                detectAddresses(items, p);
+
                 idCounter = detectedItems.length;
             }
         }
@@ -1409,12 +1417,17 @@
                         // Remove (단위:...) suffix
                         afterLabel = afterLabel.replace(/\(단위\s*[:：].*\)$/i, '').trim();
 
-                        const splitBySpace = afterLabel.split(/\s{2,}/);
-                        if (splitBySpace.length > 0) {
-                            afterLabel = splitBySpace[0].trim();
-                        }
+                        // Clean up the value (remove common sub-labels that might have been captured)
+                        // e.g. "(법인명) 주식회사 ABC" -> "주식회사 ABC"
+                        // e.g. "(대표자) 홍길동" -> "홍길동"
+                        afterLabel = afterLabel.replace(/^[\(\[\{]?(?:법인명|상호|대표자|대표이사|성명|등록번호)[\)\]\}]?\s*/, '').trim();
 
                         if (afterLabel.length >= 2 && afterLabel.length <= 30) {
+                            // Exclude if it looks like a registration number
+                            if (/^\d{3}-\d{2}-\d{5}/.test(afterLabel) || /^\d{6}-\d{7}/.test(afterLabel)) {
+                                return false;
+                            }
+
                             if (!/^\d{3}-\d{2}-\d{5}$/.test(afterLabel) && !/^\d{6}-\d{7}$/.test(afterLabel)) {
                                 const existing = detectedItems.find(d => d.type === 'company' && d.value === afterLabel);
                                 const occurrences = findTextItemPositions(items, afterLabel, page);
@@ -1503,6 +1516,52 @@
                                         });
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function detectAddresses(items, page) {
+            const lines = buildPageLines(items);
+            const addressLabels = ['주소', '소재지', '본점', '거주지'];
+
+            // Create regexes
+            const labelRegexes = addressLabels.map(l => ({
+                raw: l,
+                regex: new RegExp(l.split('').join('\\s*'))
+            }));
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                let text = (line.text || '').normalize('NFC');
+
+                for (const labelObj of labelRegexes) {
+                    const match = labelObj.regex.exec(text);
+                    if (match) {
+                        const idx = match.index;
+                        const matchedLabel = match[0];
+
+                        let addressVal = text.substring(idx + matchedLabel.length).trim();
+                        addressVal = addressVal.replace(/^[\s:：\-\|]+/, '').trim();
+
+                        // If address matches "울산광역시 남구 ..." etc.
+                        if (addressVal.length >= 5) {
+                            const existing = detectedItems.find(d => d.type === 'address' && d.value === addressVal);
+                            const occurrences = findTextItemPositions(items, addressVal, page);
+
+                            if (existing) {
+                                existing.occurrences.push(...occurrences);
+                            } else if (occurrences.length > 0) {
+                                detectedItems.push({
+                                    id: detectedItems.length,
+                                    type: 'address',
+                                    label: '주소',
+                                    value: addressVal,
+                                    checked: true,
+                                    occurrences: occurrences
+                                });
                             }
                         }
                     }
