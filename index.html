@@ -1457,11 +1457,11 @@
 
                         // Extract everything after the label
                         // MULTI-LINE FIX: Aggressively append the next line to capture wrapped text.
+                        // We must trim the gap between lines to avoid triggering the 'gap detection' (3 spaces) logic below.
                         let rawValue = text.substring(idx + matchedLabel.length);
                         if (nextText) {
-                            // Trim nextText to avoid creating artificial large gaps if it's indented.
-                            // The gap check below (3 spaces) is intended for separating columns, not wrapped lines.
-                            rawValue += ' ' + nextText.trim();
+                            // Collapse the cross-line gap into a single space
+                            rawValue = rawValue.trimEnd() + ' ' + nextText.trimStart();
                         }
 
 
