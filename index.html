@@ -1418,9 +1418,9 @@
                 cleaned = cleaned.replace(/^\(단위\s*[:：].*\)/, '').trim();
 
                 // 4. Remove Common Name Suffixes at end/start (e.g. (직인생략), (인), (대표자))
-                // Allow spaces between characters: 대\s*표\s*자
-                cleaned = cleaned.replace(/^\s*[\(\[]?\s*(?:대\s*표\s*자|법\s*인\s*명|회\s*사\s*명)\s*[\)\]]?\s*/, '').trim();
-                cleaned = cleaned.replace(/\s*[\(\[]?\s*(?:직\s*인\s*생\s*략|인|서\s*명|대\s*표\s*자)\s*[\)\]]?\s*$/, '').trim();
+                // Allow spaces between characters: 대\s*표\s*자, also handle Full-Width Parentheses \uFF08 \uFF09
+                cleaned = cleaned.replace(/^\s*[\(\[\uFF08\u300C]?\s*(?:대\s*표\s*자|법\s*인\s*명|회\s*사\s*명)\s*[\)\]\uFF09\u300D]?\s*/, '').trim();
+                cleaned = cleaned.replace(/\s*[\(\[\uFF08\u300C]?\s*(?:직\s*인\s*생\s*략|인|서\s*명|대\s*표\s*자)\s*[\)\]\uFF09\u300D]?\s*$/, '').trim();
 
                 if (cleaned.length === prevLength) break;
                 prevLength = cleaned.length;
@@ -1444,11 +1444,11 @@
 
             // Create flexible regexes (handle "사 업 자", "회사 명" etc.)
             // MODIFIED: Specific handling for "상호(법인명)", "성명(대표자)" to consume the suffix in the label match
-            // NOW SUPPORTS SPACES: 대\s*표\s*자
+            // NOW SUPPORTS SPACES: 대\s*표\s*자 AND Full-Width Parens
             const nameLabels = entityLabelsRaw.map(l => {
                 let suffix = '';
-                if (['상호', '업체명'].includes(l)) suffix = '(?:\\s*\\(?\\s*(?:법\\s*인\\s*명|회\\s*사\\s*명)\\s*\\)?)?';
-                if (['성명', '성함'].includes(l)) suffix = '(?:\\s*\\(?\\s*대\\s*표\\s*자\\s*\\)?)?';
+                if (['상호', '업체명'].includes(l)) suffix = '(?:\\s*[\\(\\[\\uFF08\\u300C]?\\s*(?:법\\s*인\\s*명|회\\s*사\\s*명)\\s*[\\)\\]\\uFF09\\u300D]?)?';
+                if (['성명', '성함'].includes(l)) suffix = '(?:\\s*[\\(\\[\\uFF08\\u300C]?\\s*대\\s*표\\s*자\\s*[\\)\\]\\uFF09\\u300D]?)?';
 
                 return {
                     raw: l,
@@ -1460,8 +1460,8 @@
             const namePatterns = [
                 /\(주\)/g, /주식회사/g, /㈜/g, /유한회사/g, /유한공사/g, /합명회사/g, /합자회사/g,
                 // Name patterns: Label + Name (handle cases where label and value are joined)
-                // MODIFIED: Handle optional label suffix in pattern detection too (with spaces)
-                /(?:대표이사|대표자|대표|성명|성함)(?:\s*[\(\[]?\s*대\s*표\s*자\s*[\)\]]?)?\s*([가-힣]{2,4})/g
+                // MODIFIED: Handle optional label suffix in pattern detection too (with spaces & full-width parens)
+                /(?:대표이사|대표자|대표|성명|성함)(?:\s*[\(\[\uFF08\u300C]?\s*대\s*표\s*자\s*[\)\]\uFF09\u300D]?)?\s*([가-힣]{2,4})/g
             ];
 
             function attemptLabelDetection(text, nextText) {
