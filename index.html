@@ -1646,95 +1646,127 @@
         function findTextItemPositions(items, searchValue, page) {
             const occurrences = [];
 
-            // Strategy 1: Direct match within single text items
-            for (const item of items) {
-                const idx = item.str.indexOf(searchValue);
+            // Strategy 1: Direct match within single text items (Optimization)
+            // Useful for simple cases, but we can skip it if we want consistent global behavior.
+            // Let's rely on the robust global strategy to ensure consistent merging.
 
-                if (idx !== -1) {
-                    // Estimate position within the text item
-                    const charRatio = item.str.length > 0 ? item.width / item.str.length : 0;
+            // Global Strategy: Visual Order Search & Merge
+            // 1. Get lines in visual order to ensure multi-line matches work naturally
+            const lines = buildPageLines(items);
 
-                    occurrences.push({
-                        page: page,
-                        x: item.x + (idx * charRatio),
-                        y: item.y,
-                        w: searchValue.length * charRatio,
-                        h: item.height,
-                        pageHeight: item.pageHeight,
-                        pageWidth: item.pageWidth
-                    });
-                }
-            }
+            // 2. Flatten to a stream of items, but keep line reference for merging
+            const sortedItems = [];
+            lines.forEach((line, lineIdx) => {
+                line.items.forEach(item => {
+                    sortedItems.push({ item, lineIdx });
+                });
+            });
 
-            // Strategy 2: Global text matching (handles multi-line, multi-item, gaps)
-            if (occurrences.length === 0) {
-                const searchChars = searchValue.replace(/\s/g, '');
+            const searchChars = searchValue.replace(/\s/g, '');
 
-                if (searchChars.length > 0) {
-                    let matchCharIdx = 0;
-                    let possibleMatchParts = [];
+            if (searchChars.length > 0) {
+                let matchCharIdx = 0;
+                let possibleMatchParts = []; // [{ item, lineIdx, start, end }]
 
-                    // We iterate through ALL items on the page
-                    for (let i = 0; i < items.length; i++) {
-                        const item = items[i];
-                        const str = item.str;
+                for (let i = 0; i < sortedItems.length; i++) {
+                    const { item, lineIdx } = sortedItems[i];
+                    const str = item.str;
 
-                        for (let c = 0; c < str.length; c++) {
-                            const char = str[c];
-                            if (/\s/.test(char)) continue; // Skip spaces in raw text
+                    for (let c = 0; c < str.length; c++) {
+                        const char = str[c];
+                        if (/\s/.test(char)) continue; // Skip spaces
 
-                            if (char === searchChars[matchCharIdx]) {
-                                // Match continues
-                                if (matchCharIdx === 0) {
-                                    possibleMatchParts = [];
+                        if (char === searchChars[matchCharIdx]) {
+                            // Match continues
+                            if (matchCharIdx === 0) {
+                                possibleMatchParts = [];
+                            }
+
+                            // Add this character's position
+                            let lastPart = possibleMatchParts.length > 0 ? possibleMatchParts[possibleMatchParts.length - 1] : null;
+
+                            // Extend existing part if same item
+                            if (lastPart && lastPart.item === item) {
+                                lastPart.end = c + 1;
+                            } else {
+                                possibleMatchParts.push({ item, lineIdx, start: c, end: c + 1 });
+                            }
+
+                            matchCharIdx++;
+
+                            if (matchCharIdx === searchChars.length) {
+                                // Full match found!
+                                // Merge parts by Line Index to create clean bounding boxes
+                                // Group by lineIdx
+                                const groups = {};
+                                for (const part of possibleMatchParts) {
+                                    if (!groups[part.lineIdx]) groups[part.lineIdx] = [];
+                                    groups[part.lineIdx].push(part);
                                 }
 
-                                // Add this character's position to parts
-                                let lastPart = possibleMatchParts.length > 0 ? possibleMatchParts[possibleMatchParts.length - 1] : null;
-                                if (lastPart && lastPart.item === item) {
-                                    lastPart.end = c + 1;
-                                } else {
-                                    possibleMatchParts.push({ item: item, start: c, end: c + 1 });
-                                }
+                                // Create bbox for each group
+                                for (const lIdx in groups) {
+                                    const parts = groups[lIdx];
+                                    // Calculate Union Box
+                                    let minX = Infinity;
+                                    let maxX = -Infinity;
+                                    let minY = Infinity;
+                                    let maxY = -Infinity;
 
-                                matchCharIdx++;
-
-                                if (matchCharIdx === searchChars.length) {
-                                    // Full match found!
-                                    for (const part of possibleMatchParts) {
+                                    // We need to calculate precise X/Width for the partial string in each part
+                                    for (const part of parts) {
                                         const item = part.item;
-                                        const start = part.start;
-                                        const end = part.end;
-                                        const len = end - start;
-
-                                        // Approximation: We assume uniform char width
                                         const totalCharCount = item.str.length;
                                         const charW = totalCharCount > 0 ? item.width / totalCharCount : 0;
 
-                                        occurrences.push({
-                                            page: page,
-                                            x: item.x + (start * charW),
-                                            y: item.y,
-                                            w: len * charW,
-                                            h: item.height,
-                                            pageHeight: item.pageHeight,
-                                            pageWidth: item.pageWidth
-                                        });
+                                        const partX = item.x + (part.start * charW);
+                                        const partW = (part.end - part.start) * charW;
+
+                                        if (partX < minX) minX = partX;
+                                        if (partX + partW > maxX) maxX = partX + partW;
+                                        // Use item height
+                                        if (item.y < minY) minY = item.y;
+                                        if (item.y + item.height > maxY) maxY = item.y + item.height;
                                     }
 
-                                    matchCharIdx = 0;
-                                    possibleMatchParts = [];
+                                    // Use the page dimensions from the first item in group
+                                    const refItem = parts[0].item;
+
+                                    occurrences.push({
+                                        page: page,
+                                        x: minX,
+                                        y: minY, // PDF coordinates are usually bottom-up? No, pdf.js output usually top-down or we use item.y directly.
+                                        // item.y is usually bottom-left in PDF raw, but PDF.js textContent might be different.
+                                        // Existing code used `y: item.y, h: item.height`.
+                                        // Let's trust existing Y usage.
+                                        w: maxX - minX,
+                                        h: maxY - minY,
+                                        // Wait, if parts are on same line but different Y (slightly), strict union might be tall.
+                                        // Use generic max height or average?
+                                        // Usually item.height is consistent on a line.
+                                        // Let's use refItem.height for consistency if on same line.
+                                        // But keep maxX - minX.
+
+                                        // Actually, let's just stick to the bounds derived.
+                                        // But `y` in previous code was `item.y`.
+
+                                        pageHeight: refItem.pageHeight,
+                                        pageWidth: refItem.pageWidth
+                                    });
                                 }
-                            } else {
-                                // Mismatch
-                                if (matchCharIdx > 0) {
-                                    matchCharIdx = 0;
-                                    possibleMatchParts = [];
-                                    // Simple retry for current char
-                                    if (char === searchChars[0]) {
-                                        matchCharIdx = 1;
-                                        possibleMatchParts.push({ item: item, start: c, end: c + 1 });
-                                    }
+
+                                matchCharIdx = 0;
+                                possibleMatchParts = [];
+                            }
+                        } else {
+                            // Mismatch
+                            if (matchCharIdx > 0) {
+                                matchCharIdx = 0;
+                                possibleMatchParts = [];
+                                // Retry ...
+                                if (char === searchChars[0]) {
+                                    matchCharIdx = 1;
+                                    possibleMatchParts.push({ item, lineIdx, start: c, end: c + 1 });
                                 }
                             }
                         }
