@@ -1440,46 +1440,40 @@
                 regex: new RegExp(l.split('').join('\\s*'))
             }));
 
-            // Company suffixes/prefixes
-            const companyPatterns = [/\(주\)/g,
-                /주식회사/g,
-                /㈜/g,
-                /유한회사/g,
-                /유한공사/g,
-                /합명회사/g,
-                /합자회사/g];
+            // Company/Name suffixes/prefixes
+            const namePatterns = [
+                /\(주\)/g, /주식회사/g, /㈜/g, /유한회사/g, /유한공사/g, /합명회사/g, /합자회사/g,
+                // Name patterns: Label + Name (handle cases where label and value are joined)
+                /(?:대표이사|대표자|대표|성명|성함)\s*([가-힣]{2,4})/g
+            ];
 
             function attemptLabelDetection(text, nextText) {
+                let foundAny = false;
                 for (const labelObj of nameLabels) {
-                    const match = labelObj.regex.exec(text);
+                    labelObj.regex.lastIndex = 0;
+                    let match;
 
-                    if (match) {
+                    // Use while to find ALL labels of this type on the line
+                    while ((match = labelObj.regex.exec(text)) !== null) {
                         const idx = match.index;
                         const matchedLabel = match[0];
 
                         // Extract everything after the label
-                        // MULTI-LINE FIX: Aggressively append the next line to capture wrapped text.
-                        // We must trim the gap between lines to avoid triggering the 'gap detection' (3 spaces) logic below.
                         let rawValue = text.substring(idx + matchedLabel.length);
                         if (nextText) {
                             // Collapse the cross-line gap into a single space
                             rawValue = rawValue.trimEnd() + ' ' + nextText.trimStart();
                         }
 
-                        // Trim leading spaces (including gaps between Label and Value) 
-                        // before checking for internal column gaps.
                         rawValue = rawValue.trimStart();
 
-                        // NEW: Truncate at Visual Gaps (3 spaces = column break)
-                        // 'buildPageLines' inserts '   ' for >12px gaps.
+                        // Truncate at Visual Gaps (3 spaces = column break)
                         const gapIndex = rawValue.indexOf('   ');
                         if (gapIndex !== -1) {
                             rawValue = rawValue.substring(0, gapIndex);
                         }
 
-                        // NEW: Truncate at Dates (e.g., 2022년, 2022-01, 2022. 01)
-                        // This prevents capturing "2022년 12월..." appearing in the next column
-                        // RegEx: YYYY + [ -.] + [Space] + MM
+                        // Truncate at Dates
                         const dateMatch = /\d{4}\s*년|\d{4}\s*[\-\.]\s*\d{2}/.exec(rawValue);
                         if (dateMatch) {
                             rawValue = rawValue.substring(0, dateMatch.index);
@@ -1489,49 +1483,47 @@
                         stopLabelsRegex.lastIndex = 0;
                         const stopMatch = stopLabelsRegex.exec(rawValue);
                         if (stopMatch) {
-                            // If stop label is found, cut off everything from there
                             rawValue = rawValue.substring(0, stopMatch.index);
                         }
 
                         // Clean it
                         let afterLabel = cleanDetectedValue(rawValue, 'company');
 
-                        if (afterLabel.length >= 2 && afterLabel.length <= 40) { // Increased max length slightly
+                        if (afterLabel.length >= 2 && afterLabel.length <= 40) {
                             // Exclude if it looks like a registration number
                             if (/^\d{3}-\d{2}-\d{5}/.test(afterLabel) || /^\d{6}-\d{7}/.test(afterLabel)) {
-                                return false; // It's a number, not a name
+                                continue;
                             }
 
-                            // Exclude if it is just a common noise word
                             if (/^(결재|담당|팀장|이사|사장|참조)$/.test(afterLabel)) {
-                                return false;
+                                continue;
                             }
 
-                            const existing = detectedItems.find(d => d.type === 'company' && d.value === afterLabel);
+                            // Match if identical OR one is substring of other (to catch partial overlaps)
+                            const existing = detectedItems.find(d => d.type === 'company' && (d.value === afterLabel || afterLabel.includes(d.value) || d.value.includes(afterLabel)));
                             const occurrences = findTextItemPositions(items, afterLabel, page);
 
-                            // Only add if we actually found occurrences on the page (validates the text)
                             if (occurrences.length > 0) {
                                 if (existing) {
                                     existing.occurrences.push(...occurrences);
                                 }
                                 else {
-                                    console.log('Detected company:', afterLabel);
+                                    console.log('Detected entity:', afterLabel);
                                     detectedItems.push({
                                         id: detectedItems.length,
                                         type: 'company',
-                                        label: '업체명',
+                                        label: '업체명/대표자',
                                         value: afterLabel,
                                         checked: true,
                                         occurrences: occurrences
                                     });
                                 }
-                                return true; // Match found
+                                foundAny = true;
                             }
                         }
                     }
                 }
-                return false;
+                return foundAny;
             }
 
             for (let i = 0; i < lines.length; i++) {
@@ -1544,53 +1536,51 @@
                 attemptLabelDetection(text, nextText);
             }
 
-            // Check for company pattern-based detection
+            // Check for pattern-based detection (Company or Representative Patterns)
             for (const line of lines) {
-                // Re-iterate for pattern-based detection
-                // Check for company pattern-based detection
-                for (const pattern of companyPatterns) {
+                for (const pattern of namePatterns) {
                     pattern.lastIndex = 0;
 
                     if (pattern.test(line.text)) {
                         const text = line.text.trim();
-                        // Attempt to grab the full company name
-                        const companyRegexes = [ // Prefix: 주식회사 ABC, (주)ABC
-                            /(?:주식회사|㈜)\s*[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF\w\s]+/g,
-                            // Suffix (Short): ABC(주), ABC㈜
-                            /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF\w\s]+\s*(?:\(주\)|㈜)/g,
-                            // Suffix (Long): ABC주식회사, ABC유한회사...
-                            /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF\w\s]+\s*(?:주식회사|유한회사|합명회사|합자회사|유한책임회사)/g];
+                        // Try both specific company regexes and general name capture
+                        const regexes = [
+                            /(?:주식회사|㈜)\s*[\uAC00-\uD7AF\w\s]+/g,
+                            /[\uAC00-\uD7AF\w\s]+\s*(?:\(주\)|㈜|주식회사|유한회사|합명회사|합자회사)/g,
+                            /(?:대표이사|대표자|대표|성명|성함)\s*([가-힣\w\s]{2,10})/g
+                        ];
 
-                        for (const cr of companyRegexes) {
+                        for (const cr of regexes) {
                             cr.lastIndex = 0;
                             let m;
 
                             while ((m = cr.exec(text)) !== null) {
-                                let companyName = m[0].trim();
-                                // STOP LABEL LOGIC for pattern match too
+                                // Prefer capture group 1 (name) if exists, else the full match (company)
+                                let detectedValue = (m[1] || m[0]).trim();
+
                                 stopLabelsRegex.lastIndex = 0;
-                                const stopMatch = stopLabelsRegex.exec(companyName);
+                                const stopMatch = stopLabelsRegex.exec(detectedValue);
                                 if (stopMatch) {
-                                    companyName = companyName.substring(0, stopMatch.index);
+                                    detectedValue = detectedValue.substring(0, stopMatch.index);
                                 }
 
-                                // Clean it too
-                                companyName = cleanDetectedValue(companyName, 'company');
+                                detectedValue = cleanDetectedValue(detectedValue, 'company');
 
-                                if (companyName.length >= 2) {
-                                    const existing = detectedItems.find(d => d.type === 'company' && d.value === companyName);
-
-                                    const occurrences = findTextItemPositions(items, companyName, page);
+                                if (detectedValue.length >= 2) {
+                                    // Match if identical OR one is substring of other (to catch partial overlaps)
+                                    const existing = detectedItems.find(d => d.type === 'company' && (d.value === detectedValue || detectedValue.includes(d.value) || d.value.includes(detectedValue)));
+                                    const occurrences = findTextItemPositions(items, detectedValue, page);
 
                                     if (existing) {
                                         existing.occurrences.push(...occurrences);
                                     }
                                     else if (occurrences.length > 0) {
+                                        console.log('Detected entity (Pattern):', detectedValue);
                                         detectedItems.push({
                                             id: detectedItems.length,
                                             type: 'company',
-                                            label: '업체명',
-                                            value: companyName,
+                                            label: '업체명/대표자',
+                                            value: detectedValue,
                                             checked: true,
                                             occurrences: occurrences
                                         });
@@ -1687,7 +1677,8 @@
                 });
             });
 
-            const searchChars = searchValue.replace(/\s/g, '');
+            // Normalize search value to NFC and remove spaces
+            const searchChars = searchValue.normalize('NFC').replace(/\s/g, '');
 
             if (searchChars.length > 0) {
                 let matchCharIdx = 0;
@@ -1695,7 +1686,8 @@
 
                 for (let i = 0; i < sortedItems.length; i++) {
                     const { item, lineIdx } = sortedItems[i];
-                    const str = item.str;
+                    // Normalize item string to NFC to ensure Hangul matches correctly
+                    const str = (item.str || '').normalize('NFC');
 
                     for (let c = 0; c < str.length; c++) {
                         const char = str[c];
@@ -1741,7 +1733,9 @@
                                     // We need to calculate precise X/Width for the partial string in each part
                                     for (const part of parts) {
                                         const item = part.item;
-                                        const totalCharCount = item.str.length;
+                                        // Use NFC length for positioning calculation since matching was done on NFC
+                                        const normalizedStr = (item.str || '').normalize('NFC');
+                                        const totalCharCount = normalizedStr.length;
                                         const charW = totalCharCount > 0 ? item.width / totalCharCount : 0;
 
                                         const partX = item.x + (part.start * charW);
