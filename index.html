@@ -1459,10 +1459,11 @@
                         // MULTI-LINE FIX: Aggressively append the next line to capture wrapped text.
                         let rawValue = text.substring(idx + matchedLabel.length);
                         if (nextText) {
-                            // Add a space to separate, but if it was wrapped, it might be continuous.
-                            // We rely on standardizing spaces later.
-                            rawValue += ' ' + nextText;
+                            // Trim nextText to avoid creating artificial large gaps if it's indented.
+                            // The gap check below (3 spaces) is intended for separating columns, not wrapped lines.
+                            rawValue += ' ' + nextText.trim();
                         }
+
 
                         // NEW: Truncate at Visual Gaps (3 spaces = column break)
                         // 'buildPageLines' inserts '   ' for >8px gaps. We use this to stop reading.
