@@ -1380,16 +1380,10 @@
         function detectCompanyNames(items, page, idCounter) {
             const lines = buildPageLines(items);
 
-            // Labels that precede company names (converted to flexible regex to handle spaces)
-            const nameLabelsRaw = ['상호',
-                '회사명',
-                '법인명',
-                '업체명',
-                '사업자',
-                '대표자',
-                '성명'];
+            // Labels that precede company names
+            const nameLabelsRaw = ['상호', '회사명', '법인명', '업체명', '사업자', '대표자', '성명', '주민등록번호', '법인등록번호', '등록번호'];
 
-            // Create regexes like /회\s*사\s*명/
+            // Create flexible regexes (handle "사 업 자", "회사 명" etc.)
             const nameLabels = nameLabelsRaw.map(l => ({
                 raw: l,
                 regex: new RegExp(l.split('').join('\\s*'))
@@ -1404,6 +1398,31 @@
                 /합명회사/g,
                 /합자회사/g];
 
+            function cleanDetectedValue(text, type) {
+                let cleaned = text.trim();
+                let prevLength = cleaned.length;
+
+                // Iteratively clean identifying prefixes
+                while (true) {
+                    // 1. Remove seperators at start
+                    cleaned = cleaned.replace(/^[\s:：\-\|\]\)\}>]+/, '').trim();
+
+                    // 2. Remove common overlapping labels
+                    // e.g. "등록번호 : 123..." -> "123..."
+                    // e.g. "(법인명) 주식회사..." -> "주식회사..."
+                    // e.g. "(본 점) 울산..." -> "울산..."
+                    cleaned = cleaned.replace(/^[\(\[\{]?(?:법인명|상호|대표자|대표이사|성명|등록번호|주민등록번호|법인등록번호|본점|주소|소재지|거주지)[\)\]\}]?\s*/, '').trim();
+
+                    // 3. Remove "Unit" suffix if captured at start (rare but possible if merged)
+                    cleaned = cleaned.replace(/^\(단위\s*[:：].*\)/, '').trim();
+
+                    if (cleaned.length === prevLength) break;
+                    prevLength = cleaned.length;
+                }
+
+                return cleaned;
+            }
+
             function attemptLabelDetection(text) {
                 for (const labelObj of nameLabels) {
                     const match = labelObj.regex.exec(text);
@@ -1412,42 +1431,41 @@
                         const idx = match.index;
                         const matchedLabel = match[0];
 
-                        let afterLabel = text.substring(idx + matchedLabel.length).trim();
-                        afterLabel = afterLabel.replace(/^[\s:：\-\|]+/, '').trim();
-                        // Remove (단위:...) suffix
-                        afterLabel = afterLabel.replace(/\(단위\s*[:：].*\)$/i, '').trim();
+                        // Extract everything after the label
+                        let rawValue = text.substring(idx + matchedLabel.length);
 
-                        // Clean up the value (remove common sub-labels that might have been captured)
-                        // e.g. "(법인명) 주식회사 ABC" -> "주식회사 ABC"
-                        // e.g. "(대표자) 홍길동" -> "홍길동"
-                        afterLabel = afterLabel.replace(/^[\(\[\{]?(?:법인명|상호|대표자|대표이사|성명|등록번호)[\)\]\}]?\s*/, '').trim();
+                        // Clean it
+                        let afterLabel = cleanDetectedValue(rawValue, 'company');
 
-                        if (afterLabel.length >= 2 && afterLabel.length <= 30) {
+                        if (afterLabel.length >= 2 && afterLabel.length <= 40) { // Increased max length slightly
                             // Exclude if it looks like a registration number
                             if (/^\d{3}-\d{2}-\d{5}/.test(afterLabel) || /^\d{6}-\d{7}/.test(afterLabel)) {
+                                return false; // It's a number, not a name
+                            }
+
+                            // Exclude if it is just a common noise word
+                            if (/^(결재|담당|팀장|이사|사장|참조)$/.test(afterLabel)) {
                                 return false;
                             }
 
-                            if (!/^\d{3}-\d{2}-\d{5}$/.test(afterLabel) && !/^\d{6}-\d{7}$/.test(afterLabel)) {
-                                const existing = detectedItems.find(d => d.type === 'company' && d.value === afterLabel);
-                                const occurrences = findTextItemPositions(items, afterLabel, page);
+                            const existing = detectedItems.find(d => d.type === 'company' && d.value === afterLabel);
+                            const occurrences = findTextItemPositions(items, afterLabel, page);
 
-                                if (existing) {
-                                    existing.occurrences.push(...occurrences);
-                                }
-                                else if (occurrences.length > 0) {
-                                    console.log('Detected company:', afterLabel);
-                                    detectedItems.push({
-                                        id: detectedItems.length,
-                                        type: 'company',
-                                        label: '업체명',
-                                        value: afterLabel,
-                                        checked: true,
-                                        occurrences: occurrences
-                                    });
-                                }
-                                return true; // Match found
+                            if (existing) {
+                                existing.occurrences.push(...occurrences);
                             }
+                            else if (occurrences.length > 0) {
+                                console.log('Detected company:', afterLabel);
+                                detectedItems.push({
+                                    id: detectedItems.length,
+                                    type: 'company',
+                                    label: '업체명',
+                                    value: afterLabel,
+                                    checked: true,
+                                    occurrences: occurrences
+                                });
+                            }
+                            return true; // Match found
                         }
                     }
                 }
@@ -1461,27 +1479,24 @@
                 // 1. Try single line detection
                 let found = attemptLabelDetection(text);
 
-                // 2. Try detection with next line (handle split label)
+                // 2. Try detection with next line
                 if (!found && i < lines.length - 1) {
                     const nextLine = lines[i + 1];
                     const nextText = (nextLine.text || '').normalize('NFC');
-                    // Simple join. If label is "회사" (line i) and "명: 우림" (line i+1), join is "회사명: 우림"
                     found = attemptLabelDetection(text + nextText);
                 }
             }
 
             // Check for company pattern-based detection
             for (const line of lines) {
-
                 // Re-iterate for pattern-based detection
                 // Check for company pattern-based detection
                 for (const pattern of companyPatterns) {
                     pattern.lastIndex = 0;
 
                     if (pattern.test(line.text)) {
-                        // Extract the company name including the pattern
                         const text = line.text.trim();
-                        // Attempt to grab the full company name (e.g., "주식회사 ABC" or "ABC(주)")
+                        // Attempt to grab the full company name
                         const companyRegexes = [ // Prefix: 주식회사 ABC, (주)ABC
                             /(?:주식회사|㈜)\s*[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF\w\s]+/g,
                             // Suffix (Short): ABC(주), ABC㈜
@@ -1494,7 +1509,9 @@
                             let m;
 
                             while ((m = cr.exec(text)) !== null) {
-                                const companyName = m[0].trim();
+                                let companyName = m[0].trim();
+                                // Clean it too
+                                companyName = cleanDetectedValue(companyName, 'company');
 
                                 if (companyName.length >= 2) {
                                     const existing = detectedItems.find(d => d.type === 'company' && d.value === companyName);
@@ -1504,7 +1521,6 @@
                                     if (existing) {
                                         existing.occurrences.push(...occurrences);
                                     }
-
                                     else if (occurrences.length > 0) {
                                         detectedItems.push({
                                             id: detectedItems.length,
@@ -1533,6 +1549,13 @@
                 regex: new RegExp(l.split('').join('\\s*'))
             }));
 
+            // Duplicate clean function or make it global/shared scope? 
+            // It's defined inside detectCompanyNames in previous block, so we redefine or move out. 
+            // Let's redefine a simple cleaner here or move `cleanDetectedValue` to global scope in next step?
+            // BETTER: We will assume cleanDetectedValue is available or duplicate logic for safety in this One-Shot.
+            // Actually, we can't easily move it out in one go without breaking.
+            // Let's inline the cleaning logic for address to be safe.
+
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 let text = (line.text || '').normalize('NFC');
@@ -1544,9 +1567,16 @@
                         const matchedLabel = match[0];
 
                         let addressVal = text.substring(idx + matchedLabel.length).trim();
-                        addressVal = addressVal.replace(/^[\s:：\-\|]+/, '').trim();
 
-                        // If address matches "울산광역시 남구 ..." etc.
+                        // Iterative cleaning for address
+                        let prevLen = addressVal.length;
+                        while (true) {
+                            addressVal = addressVal.replace(/^[\s:：\-\|\]\)\}>]+/, '').trim();
+                            addressVal = addressVal.replace(/^[\(\[\{]?(?:본점|주소|소재지|거주지)[\)\]\}]?\s*/, '').trim();
+                            if (addressVal.length === prevLen) break;
+                            prevLen = addressVal.length;
+                        }
+
                         if (addressVal.length >= 5) {
                             const existing = detectedItems.find(d => d.type === 'address' && d.value === addressVal);
                             const occurrences = findTextItemPositions(items, addressVal, page);
