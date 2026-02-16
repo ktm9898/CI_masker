@@ -1111,10 +1111,13 @@
         // Image file handling with Tesseract.js OCR
         // ============================================================
         async function handleImageFile(file) {
+            fileType = 'image'; // Correctly set local variable
+            window.fileType = 'image';
             showStatus('이미지를 읽고 있습니다...', 'info');
             showProgress(0, '이미지 로딩 중...');
 
             try {
+                // ... (omitted)
                 // Load image
                 const imgUrl = URL.createObjectURL(file);
                 originalImage = new Image();
@@ -1156,7 +1159,6 @@
                     logger: m => {
                         if (m.status === 'recognizing text') {
                             const pct = 10 + Math.round((m.progress || 0) * 70);
-
                             showProgress(pct, `텍스트 인식 중... (${Math.round((m.progress || 0) * 100)}%)`);
                         }
                     }
@@ -1164,21 +1166,22 @@
                 ocrWords = result.data.words || [];
                 console.warn('OCR Found Words:', ocrWords.length);
 
-                if (ocrWords.length > 0) {
-                    console.log('First 5 words:', ocrWords.slice(0, 5).map(w => w.text));
+                // User Feedback for Debugging
+                if (ocrWords.length === 0) {
+                    alert('OCR 엔진이 텍스트를 찾지 못했습니다. 이미지 해상도가 너무 낮거나 텍스트가 흐릿할 수 있습니다.');
+                } else {
+                    showStatus(`이미지 분석 완료 (${ocrWords.length} 단어 감지됨)`, 'success');
                 }
 
-                else {
-                    alert('OCR 결과가 없습니다. 이미지가 너무 작거나 텍스트가 명확하지 않습니다.');
+                if (ocrWords.length > 0) {
+                    console.log('First 5 words:', ocrWords.slice(0, 5).map(w => w.text));
                 }
 
                 // Convert OCR results to our text item format for reuse of detection logic
                 const imgW = originalImage.naturalWidth;
                 const imgH = originalImage.naturalHeight;
 
-                pageTextItems = {}
-
-                    ;
+                pageTextItems = {};
 
                 pageTextItems[1] = ocrWords.map(w => ({
                     str: (w.text || '').normalize('NFC'),
@@ -1203,18 +1206,64 @@
                     document.querySelector('.page-nav').style.display = 'none';
                     renderDetectedList();
                     renderPage();
-                    hideStatus();
-                }
+                    // Don't hide status immediately so user can see word count
+                    // hideStatus(); 
+                }, 500);
 
-                    , 500);
-
-            }
-
-            catch (err) {
+            } catch (err) {
                 console.error('이미지 처리 오류:', err);
                 showStatus('이미지를 처리하는 중 오류가 발생했습니다: ' + err.message, 'warning');
                 progressContainer.classList.remove('active');
             }
+        }
+
+        // ... (omitted)
+
+        function buildPageLines(items) {
+            // Group text items into lines based on Y coordinate
+            const lines = [];
+
+            let currentLine = {
+                text: '', items: [], y: null
+            };
+
+            // Adjust tolerance based on file type / page height
+            // For Image (usually high res), use larger tolerance to handle OCR jitter/slant. 
+            const tolerance = (typeof fileType !== 'undefined' && fileType === 'image') ? 10 : 3;
+
+            for (const item of items) {
+                if (currentLine.y === null || Math.abs(item.y - currentLine.y) > tolerance) {
+                    if (currentLine.text) {
+                        lines.push({
+                            ...currentLine
+                        });
+                    }
+
+                    currentLine = {
+                        text: item.str, items: [item], y: item.y
+                    };
+                }
+
+                else {
+                    // Gap Handling: Check horizontal distance to previous item
+                    const lastItem = currentLine.items[currentLine.items.length - 1];
+                    // item.x is left edge. lastItem right edge is lastItem.x + lastItem.width
+                    const gap = item.x - (lastItem.x + lastItem.width);
+
+                    // If gap is significant (indicating a visual column separator)
+                    if (gap > 8) {
+                        currentLine.text += '   ';
+                    }
+
+                    currentLine.text += item.str;
+                    currentLine.items.push(item);
+                }
+            }
+
+            if (currentLine.text) lines.push({
+                ...currentLine
+            });
+            return lines;
         }
 
         // ============================================================
@@ -1268,21 +1317,27 @@
             let idCounter = 0;
 
             // Regex patterns
+            // Use lookaround to ensure no digits precede/follow
             const patterns = [
                 {
                     type: 'business',
                     label: '사업자등록번호',
-                    regex: /\d{3}-\d{2}-\d{5}/g
+                    // Format: 3 digits + separator + 2 digits + separator + 5 digits
+                    // Allow spaces AROUND the separators, but require the separators (hyphens).
+                    // REMOVED Lookarounds to allow matches even if preceded by digits (e.g. index number "1.610...")
+                    regex: /\d{3}\s*-\s*\d{2}\s*-\s*\d{5}/g
                 },
                 {
                     type: 'corporate',
                     label: '법인등록번호',
-                    regex: /\d{6}-\d{7}/g
+                    // Format: 6 digits + separator + 7 digits
+                    regex: /\d{6}\s*-\s*\d{7}/g
                 },
                 {
                     type: 'resident',
                     label: '주민등록번호',
-                    regex: /\d{6}[- ][1-4]?[\d*]{6,7}/g
+                    // Format: 6 digits + separator + (1-4) + 6 digits (masked or not)
+                    regex: /\d{6}\s*[- ]\s*[1-4]?[\d*]{6,7}/g
                 }
             ];
 
@@ -1291,21 +1346,14 @@
                 const items = pageTextItems[p];
                 if (!items) continue;
 
-                // Build full page text for regex matching & line-based matching
-                // We link index ranges to text items for position lookup
-                const fullText = items.map(it => it.str).join('');
-
                 // -- Regex-based detection (business/corporate numbers) --
+                // Use line-based detection to avoid merging unrelated numbers (e.g. BusNo + Address No)
+                const lineText = buildPageLines(items);
+
                 for (const pattern of patterns) {
-                    let match;
-                    pattern.regex.lastIndex = 0;
-
-                    // Also search line-by-line by combining adjacent items
-                    const lineText = buildPageLines(items);
-
                     for (const line of lineText) {
                         pattern.regex.lastIndex = 0;
-
+                        let match;
                         while ((match = pattern.regex.exec(line.text)) !== null) {
                             const value = match[0];
 
@@ -1315,19 +1363,19 @@
                             // Find text items that contain this match
                             const occurrences = findTextItemPositions(items, value, p);
 
-                            if (existing) {
-                                existing.occurrences.push(...occurrences);
-                            }
-
-                            else {
-                                detectedItems.push({
-                                    id: idCounter++,
-                                    type: pattern.type,
-                                    label: pattern.label,
-                                    value: value,
-                                    checked: true,
-                                    occurrences: occurrences
-                                });
+                            if (occurrences.length > 0) {
+                                if (existing) {
+                                    existing.occurrences.push(...occurrences);
+                                } else {
+                                    detectedItems.push({
+                                        id: idCounter++,
+                                        type: pattern.type,
+                                        label: pattern.label,
+                                        value: value,
+                                        checked: true,
+                                        occurrences: occurrences
+                                    });
+                                }
                             }
                         }
                     }
@@ -1335,66 +1383,15 @@
 
                 // -- Company name detection --
                 detectCompanyNames(items, p, idCounter);
+                idCounter = detectedItems.length;
 
                 // -- Address detection --
                 detectAddresses(items, p);
-
                 idCounter = detectedItems.length;
             }
         }
 
-        function buildPageLines(items) {
-            // Group text items into lines based on Y coordinate
-            const lines = [];
 
-            let currentLine = {
-                text: '', items: [], y: null
-            };
-
-            // Adjust tolerance based on file type / page height
-            // For Image (usually high res), use larger tolerance to handle OCR jitter/slant. 
-            // pdf-masker uses global 'fileType' variable.
-            const tolerance = (typeof fileType !== 'undefined' && fileType === 'image') ? 15 : 3;
-
-            for (const item of items) {
-                if (currentLine.y === null || Math.abs(item.y - currentLine.y) > tolerance) {
-                    if (currentLine.text) {
-
-                        // Debug log for checking what lines are built
-                        // console.log('Built line:', currentLine.text); 
-                        lines.push({
-                            ...currentLine
-                        });
-                    }
-
-                    currentLine = {
-                        text: item.str, items: [item], y: item.y
-                    };
-                }
-
-                else {
-                    // Gap Handling: Check horizontal distance to previous item
-                    const lastItem = currentLine.items[currentLine.items.length - 1];
-                    // item.x is left edge. lastItem right edge is lastItem.x + lastItem.width
-                    const gap = item.x - (lastItem.x + lastItem.width);
-
-                    // If gap is significant (indicating a visual column separator)
-                    // Lowered threshold to 8px for tighter tables
-                    if (gap > 8) {
-                        // Insert wide space to simulate visual break
-                        currentLine.text += '   ';
-                    }
-
-                    currentLine.text += item.str;
-                    currentLine.items.push(item);
-                }
-            }
-
-            if (currentLine.text) lines.push({
-                ...currentLine
-            });
-            return lines;
-        }
 
         function cleanDetectedValue(text, type) {
             let cleaned = text.trim();
@@ -1402,8 +1399,6 @@
 
             // Labels to remove from start
             const removeLabelsRaw = ['법인명', '상호', '대표자', '대표이사', '성명', '등록번호', '주민등록번호', '법인등록번호', '본점', '주소', '소재지', '거주지'];
-            // IMPROVED REGEX: Handle spaces inside brackets e.g. ( 본 점 )
-            // Constructs: ^ [([{]? \s* (label chars spaced) [)]}? \s*
             const removeLabelsRegex = new RegExp(`^[\\(\\[\\{]?\\s*(?:${removeLabelsRaw.map(l => l.split('').join('\\s*')).join('|')})[\\)\\]\\}]?\\s*`);
 
             // Iteratively clean identifying prefixes
@@ -1566,10 +1561,11 @@
                         const text = line.text.trim();
                         // Try both specific company regexes and general name capture
                         const regexes = [
-                            /(?:주식회사|㈜)\s*[\uAC00-\uD7AF\w\s]+/g,
-                            /[\uAC00-\uD7AF\w\s]+\s*(?:\(주\)|㈜|주식회사|유한회사|합명회사|합자회사)/g,
+                            // MODIFIED: Added support for (주), （주）etc.
+                            /(?:주식회사|㈜|\(주\)|（주）)\s*[\uAC00-\uD7AF\w\s]+/g,
+                            /[\uAC00-\uD7AF\w\s]+\s*(?:\(주\)|㈜|（주）|주식회사|유한회사|합명회사|합자회사)/g,
                             // MODIFIED: Explicitly consume optional (Representative) suffix in pattern detection
-                            /(?:대표이사|대표자|대표|성명|성함)(?:\s*[\(\[]?\s*대표자\s*[\)\]]?)?\s*([가-힣\w\s]{2,10})/g
+                            /(?:대표이사|대표자|대표|성명|성함)(?:\s*[\(\[\uFF08\u300C]?\s*대\s*표\s*자\s*[\)\]\uFF09\u300D]?)?\s*([가-힣\w\s]{2,10})/g
                         ];
 
                         for (const cr of regexes) {
@@ -1612,6 +1608,7 @@
                         }
                     }
                 }
+
             }
         }
 
