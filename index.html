@@ -1363,9 +1363,17 @@
                 }
 
                 else {
-                    // Start new line if horizontal distance is huge (e.g. separate columns that shouldn't merge?)
-                    // But we handle column separation in detectCompanyNames logic now.
-                    // Just append.
+                    // Gap Handling: Check horizontal distance to previous item
+                    const lastItem = currentLine.items[currentLine.items.length - 1];
+                    // item.x is left edge. lastItem right edge is lastItem.x + lastItem.width
+                    const gap = item.x - (lastItem.x + lastItem.width);
+
+                    // If gap is significant (indicating a visual column separator)
+                    if (gap > 15) {
+                        // Insert wide space to simulate visual break
+                        currentLine.text += '   ';
+                    }
+
                     currentLine.text += item.str;
                     currentLine.items.push(item);
                 }
@@ -1377,11 +1385,37 @@
             return lines;
         }
 
+        function cleanDetectedValue(text, type) {
+            let cleaned = text.trim();
+            let prevLength = cleaned.length;
+
+            // Iteratively clean identifying prefixes
+            while (true) {
+                // 1. Remove seperators at start
+                cleaned = cleaned.replace(/^[\s:：\-\|\]\)\}>]+/, '').trim();
+
+                // 2. Remove common overlapping labels
+                cleaned = cleaned.replace(/^[\(\[\{]?(?:법인명|상호|대표자|대표이사|성명|등록번호|주민등록번호|법인등록번호|본점|주소|소재지|거주지)[\)\]\}]?\s*/, '').trim();
+
+                // 3. Remove "Unit" suffix if captured at start
+                cleaned = cleaned.replace(/^\(단위\s*[:：].*\)/, '').trim();
+
+                if (cleaned.length === prevLength) break;
+                prevLength = cleaned.length;
+            }
+
+            return cleaned;
+        }
+
         function detectCompanyNames(items, page, idCounter) {
             const lines = buildPageLines(items);
 
             // Labels that precede company names
             const nameLabelsRaw = ['상호', '회사명', '법인명', '업체명', '사업자', '대표자', '성명', '주민등록번호', '법인등록번호', '등록번호'];
+
+            // Stop Labels: If we encounter these while reading a value, STOP.
+            const stopLabelsRaw = ['사업자', '등록번호', '대표자', '성명', '주소', '소재지', '본점', '거주지', '업태', '종목', '전화번호', '팩스'];
+            const stopLabelsRegex = new RegExp(`(?:${stopLabelsRaw.join('|')})`, 'g');
 
             // Create flexible regexes (handle "사 업 자", "회사 명" etc.)
             const nameLabels = nameLabelsRaw.map(l => ({
@@ -1398,31 +1432,6 @@
                 /합명회사/g,
                 /합자회사/g];
 
-            function cleanDetectedValue(text, type) {
-                let cleaned = text.trim();
-                let prevLength = cleaned.length;
-
-                // Iteratively clean identifying prefixes
-                while (true) {
-                    // 1. Remove seperators at start
-                    cleaned = cleaned.replace(/^[\s:：\-\|\]\)\}>]+/, '').trim();
-
-                    // 2. Remove common overlapping labels
-                    // e.g. "등록번호 : 123..." -> "123..."
-                    // e.g. "(법인명) 주식회사..." -> "주식회사..."
-                    // e.g. "(본 점) 울산..." -> "울산..."
-                    cleaned = cleaned.replace(/^[\(\[\{]?(?:법인명|상호|대표자|대표이사|성명|등록번호|주민등록번호|법인등록번호|본점|주소|소재지|거주지)[\)\]\}]?\s*/, '').trim();
-
-                    // 3. Remove "Unit" suffix if captured at start (rare but possible if merged)
-                    cleaned = cleaned.replace(/^\(단위\s*[:：].*\)/, '').trim();
-
-                    if (cleaned.length === prevLength) break;
-                    prevLength = cleaned.length;
-                }
-
-                return cleaned;
-            }
-
             function attemptLabelDetection(text) {
                 for (const labelObj of nameLabels) {
                     const match = labelObj.regex.exec(text);
@@ -1433,6 +1442,14 @@
 
                         // Extract everything after the label
                         let rawValue = text.substring(idx + matchedLabel.length);
+
+                        // STOP LABEL LOGIC: Truncate if another label appears
+                        stopLabelsRegex.lastIndex = 0; // Reset regex for each search
+                        const stopMatch = stopLabelsRegex.exec(rawValue);
+                        if (stopMatch) {
+                            // If stop label is found, cut off everything from there
+                            rawValue = rawValue.substring(0, stopMatch.index);
+                        }
 
                         // Clean it
                         let afterLabel = cleanDetectedValue(rawValue, 'company');
@@ -1543,14 +1560,18 @@
             const lines = buildPageLines(items);
             const addressLabels = ['주소', '소재지', '본점', '거주지'];
 
+            // Stop Labels: If we encounter these while reading an address, STOP.
+            const stopLabelsRaw = ['사업자', '등록번호', '대표자', '성명', '상호', '회사명', '법인명', '업체명', '업태', '종목', '전화번호', '팩스'];
+            const stopLabelsRegex = new RegExp(`(?:${stopLabelsRaw.join('|')})`, 'g');
+
             // Create regexes
             const labelRegexes = addressLabels.map(l => ({
                 raw: l,
                 regex: new RegExp(l.split('').join('\\s*'))
             }));
 
-            // Duplicate clean function or make it global/shared scope? 
-            // It's defined inside detectCompanyNames in previous block, so we redefine or move out. 
+            // Duplicate clean function or make it global/shared scope?
+            // It's defined inside detectCompanyNames in previous block, so we redefine or move out.
             // Let's redefine a simple cleaner here or move `cleanDetectedValue` to global scope in next step?
             // BETTER: We will assume cleanDetectedValue is available or duplicate logic for safety in this One-Shot.
             // Actually, we can't easily move it out in one go without breaking.
@@ -1567,6 +1588,13 @@
                         const matchedLabel = match[0];
 
                         let addressVal = text.substring(idx + matchedLabel.length).trim();
+
+                        // STOP LABEL LOGIC: Truncate if another label appears
+                        stopLabelsRegex.lastIndex = 0;
+                        const stopMatch = stopLabelsRegex.exec(addressVal);
+                        if (stopMatch) {
+                            addressVal = addressVal.substring(0, stopMatch.index);
+                        }
 
                         // Iterative cleaning for address
                         let prevLen = addressVal.length;
