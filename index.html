@@ -1562,7 +1562,8 @@
                         const regexes = [
                             /(?:주식회사|㈜)\s*[\uAC00-\uD7AF\w\s]+/g,
                             /[\uAC00-\uD7AF\w\s]+\s*(?:\(주\)|㈜|주식회사|유한회사|합명회사|합자회사)/g,
-                            /(?:대표이사|대표자|대표|성명|성함)\s*([가-힣\w\s]{2,10})/g
+                            // MODIFIED: Explicitly consume optional (Representative) suffix in pattern detection
+                            /(?:대표이사|대표자|대표|성명|성함)(?:\s*[\(\[]?\s*대표자\s*[\)\]]?)?\s*([가-힣\w\s]{2,10})/g
                         ];
 
                         for (const cr of regexes) {
