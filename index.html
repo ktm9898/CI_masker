@@ -1666,46 +1666,77 @@
                 }
             }
 
-            // Strategy 2: Match across adjacent items (on same line)
+            // Strategy 2: Global text matching (handles multi-line, multi-item, gaps)
             if (occurrences.length === 0) {
-                const lines = buildPageLines(items);
+                const searchChars = searchValue.replace(/\s/g, '');
 
-                for (const line of lines) {
-                    const idx = line.text.indexOf(searchValue);
+                if (searchChars.length > 0) {
+                    let matchCharIdx = 0;
+                    let possibleMatchParts = [];
 
-                    if (idx !== -1 && line.items.length > 0) {
-                        // Find spanning items
-                        let charCount = 0;
-                        let startItem = null;
-                        let endItem = null;
+                    // We iterate through ALL items on the page
+                    for (let i = 0; i < items.length; i++) {
+                        const item = items[i];
+                        const str = item.str;
 
-                        for (const li of line.items) {
-                            const itemEnd = charCount + li.str.length;
+                        for (let c = 0; c < str.length; c++) {
+                            const char = str[c];
+                            if (/\s/.test(char)) continue; // Skip spaces in raw text
 
-                            if (!startItem && itemEnd > idx) {
-                                startItem = li;
+                            if (char === searchChars[matchCharIdx]) {
+                                // Match continues
+                                if (matchCharIdx === 0) {
+                                    possibleMatchParts = [];
+                                }
+
+                                // Add this character's position to parts
+                                let lastPart = possibleMatchParts.length > 0 ? possibleMatchParts[possibleMatchParts.length - 1] : null;
+                                if (lastPart && lastPart.item === item) {
+                                    lastPart.end = c + 1;
+                                } else {
+                                    possibleMatchParts.push({ item: item, start: c, end: c + 1 });
+                                }
+
+                                matchCharIdx++;
+
+                                if (matchCharIdx === searchChars.length) {
+                                    // Full match found!
+                                    for (const part of possibleMatchParts) {
+                                        const item = part.item;
+                                        const start = part.start;
+                                        const end = part.end;
+                                        const len = end - start;
+
+                                        // Approximation: We assume uniform char width
+                                        const totalCharCount = item.str.length;
+                                        const charW = totalCharCount > 0 ? item.width / totalCharCount : 0;
+
+                                        occurrences.push({
+                                            page: page,
+                                            x: item.x + (start * charW),
+                                            y: item.y,
+                                            w: len * charW,
+                                            h: item.height,
+                                            pageHeight: item.pageHeight,
+                                            pageWidth: item.pageWidth
+                                        });
+                                    }
+
+                                    matchCharIdx = 0;
+                                    possibleMatchParts = [];
+                                }
+                            } else {
+                                // Mismatch
+                                if (matchCharIdx > 0) {
+                                    matchCharIdx = 0;
+                                    possibleMatchParts = [];
+                                    // Simple retry for current char
+                                    if (char === searchChars[0]) {
+                                        matchCharIdx = 1;
+                                        possibleMatchParts.push({ item: item, start: c, end: c + 1 });
+                                    }
+                                }
                             }
-
-                            if (startItem && charCount < idx + searchValue.length) {
-                                endItem = li;
-                            }
-
-                            charCount = itemEnd;
-                        }
-
-                        if (startItem && endItem) {
-                            const x = startItem.x;
-                            const w = (endItem.x + endItem.width) - startItem.x;
-
-                            occurrences.push({
-                                page: page,
-                                x: x,
-                                y: startItem.y,
-                                w: Math.max(w, searchValue.length * 6),
-                                h: startItem.height,
-                                pageHeight: startItem.pageHeight,
-                                pageWidth: startItem.pageWidth
-                            });
                         }
                     }
                 }
