@@ -1457,10 +1457,25 @@
 
                         // Extract everything after the label
                         // MULTI-LINE FIX: Aggressively append the next line to capture wrapped text.
-                        // The 'Stop Label' logic will safely cut it off if it bleeds into the next field.
                         let rawValue = text.substring(idx + matchedLabel.length);
                         if (nextText) {
+                            // Add a space to separate, but if it was wrapped, it might be continuous.
+                            // We rely on standardizing spaces later.
                             rawValue += ' ' + nextText;
+                        }
+
+                        // NEW: Truncate at Visual Gaps (3 spaces = column break)
+                        // 'buildPageLines' inserts '   ' for >8px gaps. We use this to stop reading.
+                        const gapIndex = rawValue.indexOf('   ');
+                        if (gapIndex !== -1) {
+                            rawValue = rawValue.substring(0, gapIndex);
+                        }
+
+                        // NEW: Truncate at Dates (e.g., 2022년, 2022-01)
+                        // This prevents capturing "2022년 12월..." appearing in the next column
+                        const dateMatch = /\d{4}\s*년|\d{4}[\-\.]\d{2}/.exec(rawValue);
+                        if (dateMatch) {
+                            rawValue = rawValue.substring(0, dateMatch.index);
                         }
 
                         // STOP LABEL LOGIC: Truncate if another label appears
