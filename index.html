@@ -756,7 +756,7 @@
                 CLIENT-SIDE PROCESSING ONLY
             </div>
             <h1>재무제표 마스킹</h1>
-            <p>재무제표 PDF 또는 이미지 파일을 업로드하면 업체명, 법인번호, 사업자번호를<br>자동으로 감지하여 검은색 박스로 마스킹합니다.</p>
+            <p>재무제표 PDF 또는 이미지 파일을 업로드하면 업체명, 법인번호, 사업자번호, 대표자명, 주소를<br>자동으로 감지하여 검은색 박스로 마스킹합니다.</p>
             <div class="security-notice">🔒 모든 처리는 브라우저 내에서 수행됩니다. 서버로 데이터가 전송되지 않습니다.</div>
         </header>
 
@@ -1597,8 +1597,8 @@
             const lines = buildPageLines(items);
             const addressLabels = ['주소', '소재지', '본점', '거주지'];
 
-            // Stop Labels: Flexible regex
-            const stopLabelsRaw = ['사업자', '등록번호', '대표자', '성명', '상호', '회사명', '법인명', '업체명', '업태', '종목', '전화번호', '팩스'];
+            // Stop Labels: Flexible regex (Added representative labels)
+            const stopLabelsRaw = ['사업자', '등록번호', '대표이사', '대표자', '대표', '성명', '성함', '상호', '회사명', '법인명', '업체명', '업태', '종목', '전화번호', '팩스'];
             const stopLabelsPattern = stopLabelsRaw.map(l => l.split('').join('\\s*')).join('|');
             const stopLabelsRegex = new RegExp(`(?:${stopLabelsPattern})`, 'g');
 
@@ -1608,53 +1608,74 @@
                 regex: new RegExp(l.split('').join('\\s*'))
             }));
 
-            // Duplicate clean function or make it global/shared scope?
-            // It's defined inside detectCompanyNames in previous block, so we redefine or move out.
-            // BETTER: We will assume cleanDetectedValue is available or duplicate logic for safety in this One-Shot.
-            // Actually, we can't easily move it out in one go without breaking.
-            // Let's inline the cleaning logic for address to be safe.
-
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                let text = (line.text || '').normalize('NFC');
-
+            function attemptAddressDetection(text, nextText) {
+                let foundAny = false;
                 for (const labelObj of labelRegexes) {
-                    const match = labelObj.regex.exec(text);
-                    if (match) {
+                    labelObj.regex.lastIndex = 0;
+                    let match;
+
+                    while ((match = labelObj.regex.exec(text)) !== null) {
                         const idx = match.index;
                         const matchedLabel = match[0];
 
-                        let addressVal = text.substring(idx + matchedLabel.length).trim();
+                        // Extract value
+                        let rawValue = text.substring(idx + matchedLabel.length);
 
-                        // STOP LABEL LOGIC: Truncate if another label appears
-                        stopLabelsRegex.lastIndex = 0;
-                        const stopMatch = stopLabelsRegex.exec(addressVal);
-                        if (stopMatch) {
-                            addressVal = addressVal.substring(0, stopMatch.index);
+                        // Aggressively append next line for addresses (they are often long)
+                        if (nextText) {
+                            rawValue = rawValue.trimEnd() + ' ' + nextText.trimStart();
                         }
 
-                        // Use global cleaning function
-                        addressVal = cleanDetectedValue(addressVal, 'address');
+                        rawValue = rawValue.trimStart();
 
-                        if (addressVal.length >= 5) {
-                            const existing = detectedItems.find(d => d.type === 'address' && d.value === addressVal);
+                        // Truncate at Dates
+                        const dateMatch = /\d{4}\s*년|\d{4}\s*[\-\.]\s*\d{2}/.exec(rawValue);
+                        if (dateMatch) {
+                            rawValue = rawValue.substring(0, dateMatch.index);
+                        }
+
+                        // STOP LABEL LOGIC
+                        stopLabelsRegex.lastIndex = 0;
+                        const stopMatch = stopLabelsRegex.exec(rawValue);
+                        if (stopMatch) {
+                            rawValue = rawValue.substring(0, stopMatch.index);
+                        }
+
+                        let addressVal = cleanDetectedValue(rawValue, 'address');
+
+                        if (addressVal.length >= 5) { // Addresses usually longer
+                            const existing = detectedItems.find(d => d.type === 'address' && (d.value === addressVal || addressVal.includes(d.value) || d.value.includes(addressVal)));
                             const occurrences = findTextItemPositions(items, addressVal, page);
 
-                            if (existing) {
-                                existing.occurrences.push(...occurrences);
-                            } else if (occurrences.length > 0) {
-                                detectedItems.push({
-                                    id: detectedItems.length,
-                                    type: 'address',
-                                    label: '주소',
-                                    value: addressVal,
-                                    checked: true,
-                                    occurrences: occurrences
-                                });
+                            if (occurrences.length > 0) {
+                                if (existing) {
+                                    existing.occurrences.push(...occurrences);
+                                } else {
+                                    console.log('Detected address:', addressVal);
+                                    detectedItems.push({
+                                        id: detectedItems.length,
+                                        type: 'address',
+                                        label: '주소',
+                                        value: addressVal,
+                                        checked: true,
+                                        occurrences: occurrences
+                                    });
+                                }
+                                foundAny = true;
                             }
                         }
                     }
                 }
+                return foundAny;
+            }
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const text = (line.text || '').normalize('NFC');
+                const nextLine = i < lines.length - 1 ? lines[i + 1] : null;
+                const nextText = nextLine ? (nextLine.text || '').normalize('NFC') : '';
+
+                attemptAddressDetection(text, nextText);
             }
         }
 
