@@ -1450,9 +1450,13 @@
                 if (['상호', '업체명'].includes(l)) suffix = '(?:\\s*[\\(\\[\\uFF08\\u300C]?\\s*(?:법\\s*인\\s*명|회\\s*사\\s*명)\\s*[\\)\\]\\uFF09\\u300D]?)?';
                 if (['성명', '성함'].includes(l)) suffix = '(?:\\s*[\\(\\[\\uFF08\\u300C]?\\s*대\\s*표\\s*자\\s*[\\)\\]\\uFF09\\u300D]?)?';
 
+                // Prevent '대표' from matching inside '대표자' or '대표이사'
+                let negativeLookahead = '';
+                if (l === '대표') negativeLookahead = '(?!\\s*(?:자|이\\s*사))';
+
                 return {
                     raw: l,
-                    regex: new RegExp(l.split('').join('\\s*') + suffix, 'g')
+                    regex: new RegExp(l.split('').join('\\s*') + negativeLookahead + suffix, 'g')
                 };
             });
 
