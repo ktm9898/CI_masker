@@ -1369,7 +1369,8 @@
                     const gap = item.x - (lastItem.x + lastItem.width);
 
                     // If gap is significant (indicating a visual column separator)
-                    if (gap > 15) {
+                    // Lowered threshold to 8px for tighter tables
+                    if (gap > 8) {
                         // Insert wide space to simulate visual break
                         currentLine.text += '   ';
                     }
@@ -1389,13 +1390,17 @@
             let cleaned = text.trim();
             let prevLength = cleaned.length;
 
+            // Labels to remove from start
+            const removeLabelsRaw = ['법인명', '상호', '대표자', '대표이사', '성명', '등록번호', '주민등록번호', '법인등록번호', '본점', '주소', '소재지', '거주지'];
+            const removeLabelsRegex = new RegExp(`^[\\(\\[\\{]?(?:${removeLabelsRaw.map(l => l.split('').join('\\s*')).join('|')})[\\)\\]\\}]?\\s*`);
+
             // Iteratively clean identifying prefixes
             while (true) {
                 // 1. Remove seperators at start
                 cleaned = cleaned.replace(/^[\s:：\-\|\]\)\}>]+/, '').trim();
 
-                // 2. Remove common overlapping labels
-                cleaned = cleaned.replace(/^[\(\[\{]?(?:법인명|상호|대표자|대표이사|성명|등록번호|주민등록번호|법인등록번호|본점|주소|소재지|거주지)[\)\]\}]?\s*/, '').trim();
+                // 2. Remove common overlapping labels (Flexible spaces)
+                cleaned = cleaned.replace(removeLabelsRegex, '').trim();
 
                 // 3. Remove "Unit" suffix if captured at start
                 cleaned = cleaned.replace(/^\(단위\s*[:：].*\)/, '').trim();
@@ -1413,9 +1418,11 @@
             // Labels that precede company names
             const nameLabelsRaw = ['상호', '회사명', '법인명', '업체명', '사업자', '대표자', '성명', '주민등록번호', '법인등록번호', '등록번호'];
 
-            // Stop Labels: If we encounter these while reading a value, STOP.
+            // Stop Labels: Flexible regex
             const stopLabelsRaw = ['사업자', '등록번호', '대표자', '성명', '주소', '소재지', '본점', '거주지', '업태', '종목', '전화번호', '팩스'];
-            const stopLabelsRegex = new RegExp(`(?:${stopLabelsRaw.join('|')})`, 'g');
+            // Create regex that matches any of these, allowing spaces (사 업 자)
+            const stopLabelsPattern = stopLabelsRaw.map(l => l.split('').join('\\s*')).join('|');
+            const stopLabelsRegex = new RegExp(`(?:${stopLabelsPattern})`, 'g');
 
             // Create flexible regexes (handle "사 업 자", "회사 명" etc.)
             const nameLabels = nameLabelsRaw.map(l => ({
@@ -1444,7 +1451,7 @@
                         let rawValue = text.substring(idx + matchedLabel.length);
 
                         // STOP LABEL LOGIC: Truncate if another label appears
-                        stopLabelsRegex.lastIndex = 0; // Reset regex for each search
+                        stopLabelsRegex.lastIndex = 0;
                         const stopMatch = stopLabelsRegex.exec(rawValue);
                         if (stopMatch) {
                             // If stop label is found, cut off everything from there
@@ -1527,6 +1534,13 @@
 
                             while ((m = cr.exec(text)) !== null) {
                                 let companyName = m[0].trim();
+                                // STOP LABEL LOGIC for pattern match too
+                                stopLabelsRegex.lastIndex = 0;
+                                const stopMatch = stopLabelsRegex.exec(companyName);
+                                if (stopMatch) {
+                                    companyName = companyName.substring(0, stopMatch.index);
+                                }
+
                                 // Clean it too
                                 companyName = cleanDetectedValue(companyName, 'company');
 
@@ -1560,9 +1574,10 @@
             const lines = buildPageLines(items);
             const addressLabels = ['주소', '소재지', '본점', '거주지'];
 
-            // Stop Labels: If we encounter these while reading an address, STOP.
+            // Stop Labels: Flexible regex
             const stopLabelsRaw = ['사업자', '등록번호', '대표자', '성명', '상호', '회사명', '법인명', '업체명', '업태', '종목', '전화번호', '팩스'];
-            const stopLabelsRegex = new RegExp(`(?:${stopLabelsRaw.join('|')})`, 'g');
+            const stopLabelsPattern = stopLabelsRaw.map(l => l.split('').join('\\s*')).join('|');
+            const stopLabelsRegex = new RegExp(`(?:${stopLabelsPattern})`, 'g');
 
             // Create regexes
             const labelRegexes = addressLabels.map(l => ({
@@ -1572,7 +1587,6 @@
 
             // Duplicate clean function or make it global/shared scope?
             // It's defined inside detectCompanyNames in previous block, so we redefine or move out.
-            // Let's redefine a simple cleaner here or move `cleanDetectedValue` to global scope in next step?
             // BETTER: We will assume cleanDetectedValue is available or duplicate logic for safety in this One-Shot.
             // Actually, we can't easily move it out in one go without breaking.
             // Let's inline the cleaning logic for address to be safe.
@@ -1596,14 +1610,8 @@
                             addressVal = addressVal.substring(0, stopMatch.index);
                         }
 
-                        // Iterative cleaning for address
-                        let prevLen = addressVal.length;
-                        while (true) {
-                            addressVal = addressVal.replace(/^[\s:：\-\|\]\)\}>]+/, '').trim();
-                            addressVal = addressVal.replace(/^[\(\[\{]?(?:본점|주소|소재지|거주지)[\)\]\}]?\s*/, '').trim();
-                            if (addressVal.length === prevLen) break;
-                            prevLen = addressVal.length;
-                        }
+                        // Use global cleaning function
+                        addressVal = cleanDetectedValue(addressVal, 'address');
 
                         if (addressVal.length >= 5) {
                             const existing = detectedItems.find(d => d.type === 'address' && d.value === addressVal);
