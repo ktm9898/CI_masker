@@ -1447,7 +1447,7 @@
                 /합명회사/g,
                 /합자회사/g];
 
-            function attemptLabelDetection(text) {
+            function attemptLabelDetection(text, nextText) {
                 for (const labelObj of nameLabels) {
                     const match = labelObj.regex.exec(text);
 
@@ -1456,7 +1456,12 @@
                         const matchedLabel = match[0];
 
                         // Extract everything after the label
+                        // MULTI-LINE FIX: Aggressively append the next line to capture wrapped text.
+                        // The 'Stop Label' logic will safely cut it off if it bleeds into the next field.
                         let rawValue = text.substring(idx + matchedLabel.length);
+                        if (nextText) {
+                            rawValue += ' ' + nextText;
+                        }
 
                         // STOP LABEL LOGIC: Truncate if another label appears
                         stopLabelsRegex.lastIndex = 0;
@@ -1483,21 +1488,24 @@
                             const existing = detectedItems.find(d => d.type === 'company' && d.value === afterLabel);
                             const occurrences = findTextItemPositions(items, afterLabel, page);
 
-                            if (existing) {
-                                existing.occurrences.push(...occurrences);
+                            // Only add if we actually found occurrences on the page (validates the text)
+                            if (occurrences.length > 0) {
+                                if (existing) {
+                                    existing.occurrences.push(...occurrences);
+                                }
+                                else {
+                                    console.log('Detected company:', afterLabel);
+                                    detectedItems.push({
+                                        id: detectedItems.length,
+                                        type: 'company',
+                                        label: '업체명',
+                                        value: afterLabel,
+                                        checked: true,
+                                        occurrences: occurrences
+                                    });
+                                }
+                                return true; // Match found
                             }
-                            else if (occurrences.length > 0) {
-                                console.log('Detected company:', afterLabel);
-                                detectedItems.push({
-                                    id: detectedItems.length,
-                                    type: 'company',
-                                    label: '업체명',
-                                    value: afterLabel,
-                                    checked: true,
-                                    occurrences: occurrences
-                                });
-                            }
-                            return true; // Match found
                         }
                     }
                 }
@@ -1507,16 +1515,11 @@
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 const text = (line.text || '').normalize('NFC');
+                const nextLine = i < lines.length - 1 ? lines[i + 1] : null;
+                const nextText = nextLine ? (nextLine.text || '').normalize('NFC') : '';
 
-                // 1. Try single line detection
-                let found = attemptLabelDetection(text);
-
-                // 2. Try detection with next line
-                if (!found && i < lines.length - 1) {
-                    const nextLine = lines[i + 1];
-                    const nextText = (nextLine.text || '').normalize('NFC');
-                    found = attemptLabelDetection(text + nextText);
-                }
+                // Try detection on this line, optionally pulling in the next line
+                attemptLabelDetection(text, nextText);
             }
 
             // Check for company pattern-based detection
