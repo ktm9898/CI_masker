@@ -1417,8 +1417,9 @@
                 // 3. Remove "Unit" suffix if captured at start
                 cleaned = cleaned.replace(/^\(단위\s*[:：].*\)/, '').trim();
 
-                // 4. Remove Common Name Suffixes at end (e.g. (직인생략), (인))
-                cleaned = cleaned.replace(/\s*[\(\[]?\s*(?:직인\s*생략|인|서명)\s*[\)\]]?\s*$/, '').trim();
+                // 4. Remove Common Name Suffixes at end/start (e.g. (직인생략), (인), (대표자))
+                cleaned = cleaned.replace(/^\s*[\(\[]?\s*(?:대표자|법인명|회사명)\s*[\)\]]?\s*/, '').trim();
+                cleaned = cleaned.replace(/\s*[\(\[]?\s*(?:직인\s*생략|인|서명|대표자)\s*[\)\]]?\s*$/, '').trim();
 
                 if (cleaned.length === prevLength) break;
                 prevLength = cleaned.length;
@@ -1457,7 +1458,8 @@
             const namePatterns = [
                 /\(주\)/g, /주식회사/g, /㈜/g, /유한회사/g, /유한공사/g, /합명회사/g, /합자회사/g,
                 // Name patterns: Label + Name (handle cases where label and value are joined)
-                /(?:대표이사|대표자|대표|성명|성함)\s*([가-힣]{2,4})/g
+                // MODIFIED: Handle optional label suffix in pattern detection too
+                /(?:대표이사|대표자|대표|성명|성함)(?:\s*[\(\[]?\s*대표자\s*[\)\]]?)?\s*([가-힣]{2,4})/g
             ];
 
             function attemptLabelDetection(text, nextText) {
@@ -1610,8 +1612,8 @@
             const lines = buildPageLines(items);
             const addressLabels = ['주소', '소재지', '본점', '거주지'];
 
-            // Stop Labels: Flexible regex (Added representative labels)
-            const stopLabelsRaw = ['사업자', '등록번호', '대표이사', '대표자', '대표', '성명', '성함', '상호', '회사명', '법인명', '업체명', '업태', '종목', '전화번호', '팩스'];
+            // Stop Labels: Flexible regex (Added representative labels AND '사업연도', '신고', '처리')
+            const stopLabelsRaw = ['사업자', '등록번호', '대표이사', '대표자', '대표', '성명', '성함', '상호', '회사명', '법인명', '업체명', '업태', '종목', '전화번호', '팩스', '사업연도', '신고', '처리'];
             const stopLabelsPattern = stopLabelsRaw.map(l => l.split('').join('\\s*')).join('|');
             const stopLabelsRegex = new RegExp(`(?:${stopLabelsPattern})`, 'g');
 
