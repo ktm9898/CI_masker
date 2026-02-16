@@ -1437,7 +1437,7 @@
             // Create flexible regexes (handle "사 업 자", "회사 명" etc.)
             const nameLabels = entityLabelsRaw.map(l => ({
                 raw: l,
-                regex: new RegExp(l.split('').join('\\s*'))
+                regex: new RegExp(l.split('').join('\\s*'), 'g') // 'g' flag essential for while(exec)
             }));
 
             // Company/Name suffixes/prefixes
@@ -1605,7 +1605,7 @@
             // Create regexes
             const labelRegexes = addressLabels.map(l => ({
                 raw: l,
-                regex: new RegExp(l.split('').join('\\s*'))
+                regex: new RegExp(l.split('').join('\\s*'), 'g') // 'g' flag essential for while(exec)
             }));
 
             function attemptAddressDetection(text, nextText) {
