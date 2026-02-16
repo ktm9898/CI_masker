@@ -1412,6 +1412,9 @@
                 // 3. Remove "Unit" suffix if captured at start
                 cleaned = cleaned.replace(/^\(단위\s*[:：].*\)/, '').trim();
 
+                // 4. Remove Common Name Suffixes at end (e.g. (직인생략), (인))
+                cleaned = cleaned.replace(/\s*[\(\[]?\s*(?:직인\s*생략|인|서명)\s*[\)\]]?\s*$/, '').trim();
+
                 if (cleaned.length === prevLength) break;
                 prevLength = cleaned.length;
             }
@@ -1422,18 +1425,17 @@
         function detectCompanyNames(items, page, idCounter) {
             const lines = buildPageLines(items);
 
-            // Labels that precede company names
-            const nameLabelsRaw = ['상호', '회사명', '법인명', '업체명', '사업자', '대표자', '성명', '주민등록번호', '법인등록번호', '등록번호'];
+            // Labels that precede entities (Company or Representative)
+            const entityLabelsRaw = ['상호', '회사명', '법인명', '업체명', '사업자', '대표이사', '대표자', '대표', '성명', '성함', '주민등록번호', '법인등록번호', '등록번호'];
 
             // Stop Labels: Flexible regex
-            // ADDED: '주민', '법인' to catch '주민(법인)등록번호' start
-            const stopLabelsRaw = ['사업자', '등록번호', '대표자', '성명', '주소', '소재지', '본점', '거주지', '업태', '종목', '전화번호', '팩스', '주민', '법인'];
+            const stopLabelsRaw = ['사업자', '등록번호', '대표이사', '대표자', '대표', '성명', '성함', '주소', '소재지', '본점', '거주지', '업태', '종목', '전화번호', '팩스', '주민', '법인'];
             // Create regex that matches any of these, allowing spaces (사 업 자)
             const stopLabelsPattern = stopLabelsRaw.map(l => l.split('').join('\\s*')).join('|');
             const stopLabelsRegex = new RegExp(`(?:${stopLabelsPattern})`, 'g');
 
             // Create flexible regexes (handle "사 업 자", "회사 명" etc.)
-            const nameLabels = nameLabelsRaw.map(l => ({
+            const nameLabels = entityLabelsRaw.map(l => ({
                 raw: l,
                 regex: new RegExp(l.split('').join('\\s*'))
             }));
