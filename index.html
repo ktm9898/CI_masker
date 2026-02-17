@@ -861,6 +861,7 @@
                         <div class="toggle-group">
                             <button id="view-original" class="active">원본</button>
                             <button id="view-masked">마스킹</button>
+                            <button id="toggle-draw-mask" title="직접 영역 지정">🖱️ 영역 지정</button>
                         </div>
                         <div class="page-nav">
                             <button id="prev-page" disabled>◀</button>
@@ -1164,7 +1165,7 @@
                     }
                 });
                 ocrWords = result.data.words || [];
-                console.warn('OCR Found Words:', ocrWords.length);
+                // console.warn('OCR Found Words:', ocrWords.length);
 
                 // User Feedback for Debugging
                 if (ocrWords.length === 0) {
@@ -1174,7 +1175,7 @@
                 }
 
                 if (ocrWords.length > 0) {
-                    console.log('First 5 words:', ocrWords.slice(0, 5).map(w => w.text));
+                    // console.log('First 5 words:', ocrWords.slice(0, 5).map(w => w.text));
                 }
 
                 // Convert OCR results to our text item format for reuse of detection logic
@@ -1524,7 +1525,7 @@
                                     existing.occurrences.push(...occurrences);
                                 }
                                 else {
-                                    console.log('Detected entity:', afterLabel);
+                                    // console.log('Detected entity:', afterLabel);
                                     detectedItems.push({
                                         id: detectedItems.length,
                                         type: 'company',
@@ -1593,7 +1594,7 @@
                                         existing.occurrences.push(...occurrences);
                                     }
                                     else if (occurrences.length > 0) {
-                                        console.log('Detected entity (Pattern):', detectedValue);
+                                        // console.log('Detected entity (Pattern):', detectedValue);
                                         detectedItems.push({
                                             id: detectedItems.length,
                                             type: 'company',
@@ -1670,7 +1671,7 @@
                                 if (existing) {
                                     existing.occurrences.push(...occurrences);
                                 } else {
-                                    console.log('Detected address:', addressVal);
+                                    // console.log('Detected address:', addressVal);
                                     detectedItems.push({
                                         id: detectedItems.length,
                                         type: 'address',
@@ -1885,6 +1886,7 @@
             });
 
             renderDetectedList();
+            renderPage();
             manualInput.value = '';
 
             if (allOccurrences.length === 0) {
@@ -1928,6 +1930,7 @@
                     if (item) item.checked = e.target.checked;
                     const count = detectedItems.filter(d => d.checked).length;
                     maskBtn.disabled = count === 0;
+                    renderPage();
                 });
             });
         }
@@ -2342,11 +2345,277 @@
         document.getElementById('select-all-btn').addEventListener('click', () => {
             detectedItems.forEach(d => d.checked = true);
             renderDetectedList();
+            renderPage();
         });
 
         document.getElementById('deselect-all-btn').addEventListener('click', () => {
             detectedItems.forEach(d => d.checked = false);
             renderDetectedList();
+            renderPage();
+        });
+
+        // ============================================================
+        // Manual Area Selection (Drag)
+        // ============================================================
+        let isDrawingMode = false;
+        let isDrawing = false;
+        let startX = 0;
+        let startY = 0;
+        const toggleDrawBtn = document.getElementById('toggle-draw-mask');
+        let selectionBox = null;
+
+        toggleDrawBtn.addEventListener('click', () => {
+            if (viewMode === 'masked') {
+                alert('원본 보기 모드에서만 영역을 지정할 수 있습니다.');
+                return;
+            }
+
+            isDrawingMode = !isDrawingMode;
+            if (isDrawingMode) {
+                toggleDrawBtn.classList.add('active');
+                canvasWrapper.style.cursor = 'crosshair';
+            } else {
+                toggleDrawBtn.classList.remove('active');
+                canvasWrapper.style.cursor = 'default';
+            }
+        });
+
+        canvasWrapper.addEventListener('mousedown', (e) => {
+            if (!isDrawingMode || viewMode !== 'original') return;
+            // Only start if clicking on canvas
+            if (e.target.tagName !== 'CANVAS') return;
+
+            e.preventDefault();
+            isDrawing = true;
+
+            // Get coordinates relative to canvasWrapper
+            const rect = canvasWrapper.getBoundingClientRect();
+            // Store initial scroll positions
+            const scrollLeft = canvasWrapper.scrollLeft;
+            const scrollTop = canvasWrapper.scrollTop;
+
+            // Calculate start X/Y relative to the content (including scroll)
+            startX = e.clientX - rect.left + scrollLeft;
+            startY = e.clientY - rect.top + scrollTop;
+
+            // Create selection box
+            selectionBox = document.createElement('div');
+            selectionBox.style.position = 'absolute';
+            selectionBox.style.border = '2px dashed var(--danger)';
+            selectionBox.style.backgroundColor = 'rgba(239, 68, 68, 0.2)';
+            selectionBox.style.pointerEvents = 'none'; // Allow mouse events to pass through
+            selectionBox.style.left = startX + 'px';
+            selectionBox.style.top = startY + 'px';
+            selectionBox.style.width = '0px';
+            selectionBox.style.height = '0px';
+            canvasWrapper.appendChild(selectionBox); // Append to wrapper to handle scrolling
+            // Ensure wrapper is relative positioning context for absolute child if not already (it is flex, might need relative)
+            // style says flex. Let's make sure it handles absolute children correctly relative to its scroll content? 
+            // Actually, usually easier to append to body or use a wrapper div inside canvasWrapper.
+            // But canvasWrapper has 'overflow: auto'. 
+            // Let's ensure canvasWrapper has relative position for the absolute box to be relative to it?
+            // CSS says .canvas-wrapper { ... overflow: auto ... }
+            // If we append absolute div to it, it positions relative to padding box.
+            // Correct.
+            if (window.getComputedStyle(canvasWrapper).position === 'static') {
+                canvasWrapper.style.position = 'relative';
+            }
+        });
+
+        canvasWrapper.addEventListener('mousemove', (e) => {
+            if (!isDrawing || !selectionBox) return;
+
+            const rect = canvasWrapper.getBoundingClientRect();
+            const scrollLeft = canvasWrapper.scrollLeft;
+            const scrollTop = canvasWrapper.scrollTop;
+
+            const currentX = e.clientX - rect.left + scrollLeft;
+            const currentY = e.clientY - rect.top + scrollTop;
+
+            const x = Math.min(startX, currentX);
+            const y = Math.min(startY, currentY);
+            const w = Math.abs(currentX - startX);
+            const h = Math.abs(currentY - startY);
+
+            selectionBox.style.left = x + 'px';
+            selectionBox.style.top = y + 'px';
+            selectionBox.style.width = w + 'px';
+            selectionBox.style.height = h + 'px';
+        });
+
+        canvasWrapper.addEventListener('mouseup', (e) => {
+            if (!isDrawing || !selectionBox) return;
+
+            isDrawing = false;
+
+            // Get final geometry from the selection box style (which includes scroll calc)
+            const boxX = parseFloat(selectionBox.style.left);
+            const boxY = parseFloat(selectionBox.style.top);
+            const boxW = parseFloat(selectionBox.style.width);
+            const boxH = parseFloat(selectionBox.style.height);
+
+            selectionBox.remove();
+            selectionBox = null;
+
+            if (boxW < 5 || boxH < 5) return; // Ignore tiny clicks
+
+            // Convert to PDF/Image Coordinates
+            // We need to know where the Canvas is inside the Wrapper.
+            // visual: Canvas is centered in Wrapper using flex justify-center.
+            // If the wrapper is wider than canvas, there are margins.
+            // If canvas is wider, we scroll.
+            // "startX" obtained above is relative to Wrapper's content area (0,0 is top-left of scrollable area).
+            // But if generic flex centering is used, the canvas might be offset effectively.
+
+            // Let's get the CANVAS position relative to the Wrapper.
+            const canvas = canvasWrapper.querySelector('canvas');
+            if (!canvas) return;
+
+            // Offset of canvas relative to wrapper
+            // Since wrapper is relative, and canvas is a child.
+            // canvas.offsetLeft/Top should give position relative to wrapper.
+            const canvasOffsetX = canvas.offsetLeft;
+            const canvasOffsetY = canvas.offsetTop;
+
+            // Calculate X,Y relative to Canvas
+            const xInCanvas = boxX - canvasOffsetX;
+            const yInCanvas = boxY - canvasOffsetY;
+
+            // Now convert to PDF/Image logical coords
+            // Current Scale for PDF is 1.5 in renderPage().
+            // For Image, we don't have a global 'scale' var updated in renderPage.
+            // We need to retrieve the scale used.
+
+            let scale = 1.0;
+            if (fileType === 'pdf') {
+                scale = 1.5;
+            } else {
+                // For Image, canvas width IS the natural width? 
+                // Logic in renderPage():
+                // canvas.width = originalImage.naturalWidth;
+                // if (canvas.width > 800) canvas.style.maxWidth = '100%';
+                // Wait, if CSS scales it down, we have a problem with coordinate mapping if we use canvas dimension for logic.
+                // In renderPage: `canvas.style.maxWidth = '100%';`
+                // `ctx.drawImage` uses full resolution.
+                // `e.offsetX` etc would be based on visual size.
+                // We need the ratio of Visual Size / Internal Size.
+
+                const visualW = canvas.offsetWidth;
+                const internalW = canvas.width;
+                scale = visualW / internalW;
+                // Actually this "scale" is visual-to-internal ratio.
+                // But wait, my manual drawing was on top of the wrapper. 
+                // So boxW/boxH are visual pixels.
+                // We need to map visual pixels -> Internal Canvas Pixels -> Original Image/PDF Coords.
+            }
+
+            // Let's robustly get the scale factor:
+            // Internal coordinate (PDF point or Image pixel) * globalScale = Canvas Pixel
+            // Canvas Pixel * cssScale = Visual Pixel
+
+            // We have Visual Pixels (xInCanvas, yInCanvas).
+
+            // 1. Map Visual -> Canvas Internal
+            const visualW = canvas.offsetWidth; // displayed width
+            const internalW = canvas.width;     // internal width resolution
+            const cssScale = visualW / internalW; // usually 1 if no css resizing, or < 1 if fit
+
+            const internalX = xInCanvas / cssScale;
+            const internalY = yInCanvas / cssScale;
+            const internalW_rect = boxW / cssScale;
+            const internalH_rect = boxH / cssScale;
+
+            // 2. Map Canvas Internal -> Logical PDF/Image Coords
+            // In renderPage (PDF): viewport scale = 1.5. Canvas W = Viewport W.
+            // So Internal = Logical * 1.5
+            // Logical = Internal / 1.5
+
+            let logicalX, logicalY, logicalW, logicalH;
+
+            if (fileType === 'pdf') {
+                const renderScale = 1.5;
+                logicalX = internalX / renderScale;
+                logicalW = internalW_rect / renderScale;
+                logicalH = internalH_rect / renderScale;
+
+                // PDF Y is inverted?
+                // In drawDetectionBoxes: canvasY = (occ.pageHeight - occ.y - occ.h) * scale;
+                // Here we have canvasY (internalY).
+                // internalY = (pageHeight - logicalY - logicalH) * renderScale
+                // internalY / renderScale = pageHeight - logicalY - logicalH
+                // logicalY = pageHeight - (internalY / renderScale) - logicalH
+
+                // We need pageHeight.
+                // We can get it from current PDF page viewport.
+                // pdfDoc.getPage(currentPage)... async. 
+                // We can approximate or fetch. 
+                // Better to store page dimensions in global or fetch from `pageTextItems`?
+                // `pageTextItems[currentPage]` might be empty if no text.
+                // But we rendered it, so we can get viewport from pdfDoc.
+                // Let's assume we can get it from the canvas ratio if we don't want async.
+                // But simplest is just use `logicalY` from top for collection?
+                // No, our masking logic uses PDF bottom-left origin.
+                // We MUST flip it.
+
+                // Let's use the current viewport height derived from canvas height.
+                // canvas.height = viewport.height (internal)
+                // logicalPageHeight = canvas.height / renderScale
+                const logicalPageHeight = canvas.height / renderScale;
+
+                logicalY = logicalPageHeight - (internalY / renderScale) - logicalH;
+
+                // Force valid range?
+                if (logicalY < 0) logicalY = 0;
+            }
+            else {
+                // Image
+                // Image "Logical" is same as Original Pixels.
+                // In renderPage: canvas.width = originalImage.naturalWidth.
+                // So "Internal" == "Logical". renderScale = 1.
+                // Image Y is top-down in our logic (we flip it only for display/masking consistency if needed).
+                // Wait, in handleImageFile:
+                // y: imgH - (w.bbox.y1 / scaleFactor) -- wait, that was Tesseract.
+                // Let's look at `drawDetectionBoxes`:
+                // canvasY = (occ.pageHeight - occ.y - occ.h) * scale; (scale is 1 for image original view)
+                // This implies `occ.y` IS stored as bottom-up even for images?
+                // Yes: "Image y is stored as bottom-up (like PDF) to reuse detection logic"
+                // So we must Flip here too.
+
+                const logicalPageHeight = canvas.height; // since scale is 1
+                logicalX = internalX;
+                logicalW = internalW_rect;
+                logicalH = internalH_rect;
+
+                logicalY = logicalPageHeight - internalY - logicalH;
+            }
+
+            // Create Item
+            const newItem = {
+                id: detectedItems.length,
+                type: 'manual_area',
+                label: '수동 영역',
+                value: '사용자 지정 영역',
+                checked: true,
+                occurrences: [{
+                    page: currentPage,
+                    x: logicalX,
+                    y: logicalY,
+                    w: logicalW,
+                    h: logicalH,
+                    pageHeight: fileType === 'pdf' ? (canvas.height / 1.5) : canvas.height,
+                    pageWidth: fileType === 'pdf' ? (canvas.width / 1.5) : canvas.width
+                }],
+                manual: true
+            };
+
+            detectedItems.push(newItem);
+            renderDetectedList();
+            renderPage();
+
+            // Turn off drawing mode after one selection? Or keep it?
+            // Usually easier to keep enabling for multiple. 
+            // But user might want to drag map.
+            // Let's keep it on until toggled off.
         });
     </script>
 </body>
