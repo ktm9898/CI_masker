@@ -847,7 +847,8 @@
 
                 <!-- Actions -->
                 <div class="action-buttons">
-                    <button class="btn btn-primary" id="mask-btn" disabled>🛡️ 마스킹 처리</button>
+                    <button class="btn btn-primary" id="auto-mask-btn" disabled>⚡ 자동 마스킹 실행</button>
+                    <button class="btn btn-secondary" id="mask-btn" disabled>🛡️ 마스킹 처리 (수동포함)</button>
                     <button class="btn btn-success hidden" id="download-btn">⬇️ 마스킹된 파일 다운로드</button>
                     <button class="btn btn-secondary" id="reset-btn">🔄 새 파일 처리</button>
                 </div>
@@ -923,6 +924,7 @@
         const detectedCountEl = document.getElementById('detected-count');
         const manualInput = document.getElementById('manual-input');
         const maskBtn = document.getElementById('mask-btn');
+        const autoMaskBtn = document.getElementById('auto-mask-btn');
         const downloadBtn = document.getElementById('download-btn');
         const canvasWrapper = document.getElementById('canvas-wrapper');
         const pageInfoEl = document.getElementById('page-info');
@@ -1010,31 +1012,7 @@
                 currentPage = 1;
                 await renderPage(currentPage);
 
-                showProgress(30, '텍스트 추출 중...');
-                await extractAllText();
-
-                // Check if text was found. If not, try OCR.
-                let hasText = false;
-
-                for (let p = 1; p <= totalPages; p++) {
-                    if (pageTextItems[p] && pageTextItems[p].length > 10) {
-                        // Threshold > 10 items
-                        hasText = true;
-                        break;
-                    }
-                }
-
-                if (!hasText) {
-                    if (confirm('텍스트 레이어가 없는 PDF(스캔본 등)로 보입니다. 이미지 인식(OCR)을 수행하시겠습니까?\n(시간이 조금 더 걸릴 수 있습니다)')) {
-                        await performPdfOcr();
-                    }
-                }
-
-                showProgress(85, '패턴 분석 중...');
-                detectPatterns(); // Now detect patterns on extracted (or OCR'd) text
-
-                showProgress(100, '분석 완료!');
-
+                // Show preview immediately
                 setTimeout(() => {
                     uploadSection.classList.add('hidden');
                     progressContainer.classList.remove('active');
@@ -1046,13 +1024,13 @@
                     renderDetectedList();
                     renderPage();
                     hideStatus();
+
+                    // Enable mask button for manual usage
+                    maskBtn.disabled = false;
+                    autoMaskBtn.disabled = false;
                 }, 500);
 
-
-
-            }
-
-            catch (err) {
+            } catch (err) {
                 console.error('PDF 처리 오류:', err);
                 showStatus('PDF 파일을 처리하는 중 오류가 발생했습니다: ' + err.message, 'warning');
                 progressContainer.classList.remove('active');
@@ -1132,73 +1110,7 @@
                 totalPages = 1;
                 currentPage = 1;
 
-                // Pre-process image for better OCR: Upscale and Grayscale
-                const scaleFactor = originalImage.naturalWidth < 3000 ? 2.5 : 1.5; // Aggressive scaling for small images
-                const preprocessCanvas = document.createElement('canvas');
-                preprocessCanvas.width = originalImage.naturalWidth * scaleFactor;
-                preprocessCanvas.height = originalImage.naturalHeight * scaleFactor;
-                const pCtx = preprocessCanvas.getContext('2d');
-                pCtx.drawImage(originalImage, 0, 0, preprocessCanvas.width, preprocessCanvas.height);
-
-                // Optional: Convert to grayscale (simple average)
-                const imgData = pCtx.getImageData(0, 0, preprocessCanvas.width, preprocessCanvas.height);
-                const data = imgData.data;
-
-                for (let i = 0; i < data.length; i += 4) {
-                    const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                    data[i] = avg; // R
-                    data[i + 1] = avg; // G
-                    data[i + 2] = avg; // B
-                }
-
-                pCtx.putImageData(imgData, 0, 0);
-
-                showProgress(10, 'OCR 엔진 초기화 및 이미지 전처리 중...');
-
-                // Run Tesseract OCR on processed canvas
-                const result = await Tesseract.recognize(preprocessCanvas, 'kor+eng', {
-                    logger: m => {
-                        if (m.status === 'recognizing text') {
-                            const pct = 10 + Math.round((m.progress || 0) * 70);
-                            showProgress(pct, `텍스트 인식 중... (${Math.round((m.progress || 0) * 100)}%)`);
-                        }
-                    }
-                });
-                ocrWords = result.data.words || [];
-                // console.warn('OCR Found Words:', ocrWords.length);
-
-                // User Feedback for Debugging
-                if (ocrWords.length === 0) {
-                    alert('OCR 엔진이 텍스트를 찾지 못했습니다. 이미지 해상도가 너무 낮거나 텍스트가 흐릿할 수 있습니다.');
-                } else {
-                    showStatus(`이미지 분석 완료 (${ocrWords.length} 단어 감지됨)`, 'success');
-                }
-
-                if (ocrWords.length > 0) {
-                    // console.log('First 5 words:', ocrWords.slice(0, 5).map(w => w.text));
-                }
-
-                // Convert OCR results to our text item format for reuse of detection logic
-                const imgW = originalImage.naturalWidth;
-                const imgH = originalImage.naturalHeight;
-
-                pageTextItems = {};
-
-                pageTextItems[1] = ocrWords.map(w => ({
-                    str: (w.text || '').normalize('NFC'),
-                    x: w.bbox.x0 / scaleFactor,
-                    y: imgH - (w.bbox.y1 / scaleFactor), // convert to bottom-left origin relative to original H
-                    width: (w.bbox.x1 - w.bbox.x0) / scaleFactor,
-                    height: (w.bbox.y1 - w.bbox.y0) / scaleFactor,
-                    pageHeight: imgH,
-                    pageWidth: imgW
-                }));
-
-                showProgress(85, '패턴 분석 중...');
-                detectPatterns();
-
-                showProgress(100, '분석 완료!');
-
+                // Show preview and allow manual interaction
                 setTimeout(() => {
                     uploadSection.classList.add('hidden');
                     progressContainer.classList.remove('active');
@@ -1207,13 +1119,139 @@
                     document.querySelector('.page-nav').style.display = 'none';
                     renderDetectedList();
                     renderPage();
-                    // Don't hide status immediately so user can see word count
-                    // hideStatus(); 
+                    hideStatus();
+
+                    // Enable mask button
+                    maskBtn.disabled = false;
+                    autoMaskBtn.disabled = false;
                 }, 500);
 
             } catch (err) {
                 console.error('이미지 처리 오류:', err);
                 showStatus('이미지를 처리하는 중 오류가 발생했습니다: ' + err.message, 'warning');
+                progressContainer.classList.remove('active');
+            }
+        }
+
+        // ============================================================
+        // Auto Masking Logic (Refactored from handle functions)
+        // ============================================================
+        autoMaskBtn.addEventListener('click', () => {
+            runAutoMasking();
+        });
+
+        async function runAutoMasking() {
+            // Confirmation for Image or Scanned PDF
+            if (fileType === 'image') {
+                if (!confirm('이미지 파일 자동 분석은 OCR 과정을 포함하여 시간이 소요될 수 있습니다.\n계속 진행하시겠습니까?')) {
+                    return;
+                }
+            }
+
+            showStatus('자동 분석을 시작합니다...', 'info');
+            progressContainer.classList.add('active');
+
+            try {
+                if (fileType === 'pdf') {
+                    showProgress(30, '텍스트 추출 중...');
+                    await extractAllText();
+
+                    // Check if text was found. If not, try OCR.
+                    let hasText = false;
+
+                    for (let p = 1; p <= totalPages; p++) {
+                        if (pageTextItems[p] && pageTextItems[p].length > 10) {
+                            // Threshold > 10 items
+                            hasText = true;
+                            break;
+                        }
+                    }
+
+                    if (!hasText) {
+                        if (confirm('텍스트 레이어가 없는 PDF(스캔본 등)로 보입니다. 이미지 인식(OCR)을 수행하시겠습니까?\n(시간이 조금 더 걸릴 수 있습니다)')) {
+                            await performPdfOcr();
+                        }
+                    }
+                } else if (fileType === 'image') {
+                    // Pre-process image for better OCR: Upscale and Grayscale
+                    // Note: We need to re-create preprocess canvas as it wasn't saved globally
+                    const scaleFactor = originalImage.naturalWidth < 3000 ? 2.5 : 1.5;
+                    const preprocessCanvas = document.createElement('canvas');
+                    preprocessCanvas.width = originalImage.naturalWidth * scaleFactor;
+                    preprocessCanvas.height = originalImage.naturalHeight * scaleFactor;
+                    const pCtx = preprocessCanvas.getContext('2d');
+                    pCtx.drawImage(originalImage, 0, 0, preprocessCanvas.width, preprocessCanvas.height);
+
+                    // Optional: Convert to grayscale
+                    const imgData = pCtx.getImageData(0, 0, preprocessCanvas.width, preprocessCanvas.height);
+                    const data = imgData.data;
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        data[i] = avg;
+                        data[i + 1] = avg;
+                        data[i + 2] = avg;
+                    }
+
+                    pCtx.putImageData(imgData, 0, 0);
+
+                    showProgress(10, 'OCR 엔진 초기화 및 이미지 전처리 중...');
+
+                    // Run Tesseract OCR on processed canvas
+                    const result = await Tesseract.recognize(preprocessCanvas, 'kor+eng', {
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                const pct = 10 + Math.round((m.progress || 0) * 70);
+                                showProgress(pct, `텍스트 인식 중... (${Math.round((m.progress || 0) * 100)}%)`);
+                            }
+                        }
+                    });
+                    ocrWords = result.data.words || [];
+
+                    if (ocrWords.length === 0) {
+                        alert('OCR 엔진이 텍스트를 찾지 못했습니다. 이미지 해상도가 너무 낮거나 텍스트가 흐릿할 수 있습니다.');
+                    }
+
+                    // Convert OCR results 
+                    const imgW = originalImage.naturalWidth;
+                    const imgH = originalImage.naturalHeight;
+
+                    pageTextItems = {};
+                    pageTextItems[1] = ocrWords.map(w => ({
+                        str: (w.text || '').normalize('NFC'),
+                        x: w.bbox.x0 / scaleFactor,
+                        y: imgH - (w.bbox.y1 / scaleFactor),
+                        width: (w.bbox.x1 - w.bbox.x0) / scaleFactor,
+                        height: (w.bbox.y1 - w.bbox.y0) / scaleFactor,
+                        pageHeight: imgH,
+                        pageWidth: imgW
+                    }));
+                }
+
+                showProgress(85, '패턴 분석 중...');
+                detectPatterns();
+
+                showProgress(100, '분석 완료!');
+
+                setTimeout(() => {
+                    progressContainer.classList.remove('active');
+                    renderDetectedList();
+                    renderPage();
+
+                    const count = detectedItems.length;
+                    if (count > 0) {
+                        showStatus(`${count}개의 항목이 자동으로 감지되었습니다.`, 'success');
+                    } else {
+                        showStatus('자동 감지된 항목이 없습니다. 수동으로 영역을 지정해주세요.', 'warning');
+                    }
+
+                    // Keep mask button enabled
+                    maskBtn.disabled = false;
+                }, 500);
+
+            } catch (err) {
+                console.error('자동 분석 오류:', err);
+                showStatus('분석 중 오류가 발생했습니다: ' + err.message, 'warning');
                 progressContainer.classList.remove('active');
             }
         }
