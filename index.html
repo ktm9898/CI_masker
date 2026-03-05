@@ -751,20 +751,24 @@
         }
 
         .return-btn {
+            position: absolute;
+            top: 32px;
+            right: 32px;
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            padding: 10px 20px;
+            gap: 6px;
+            padding: 6px 14px;
             border-radius: 100px;
-            background: var(--glass-bg);
+            background: var(--bg-card);
             border: 1px solid var(--glass-border);
-            font-size: 14px;
+            font-size: 13px;
             color: var(--text-primary);
             font-weight: 700;
             text-decoration: none;
             backdrop-filter: blur(10px);
             transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            margin-bottom: 20px;
+            z-index: 100;
+            box-shadow: var(--shadow);
         }
 
         .return-btn:hover {
@@ -776,19 +780,29 @@
         }
 
         .return-btn .icon {
-            font-size: 18px;
+            font-size: 14px;
+        }
+
+        @media (max-width: 768px) {
+            .return-btn {
+                position: relative;
+                top: 0;
+                right: 0;
+                margin-bottom: 20px;
+                justify-content: center;
+            }
         }
     </style>
 </head>
 
 <body>
     <div class="app-container">
+        <a href="../financial_analyzer/index.html" class="return-btn fade-in">
+            <span class="icon">📊</span>
+            <span>AI 분석 리포트 생성하러 가기</span>
+        </a>
         <!-- Header -->
         <header class="header">
-            <a href="../financial_analyzer/index.html" class="return-btn fade-in">
-                <span class="icon">📊</span>
-                <span>AI 분석 리포트 생성하러 가기</span>
-            </a>
             <div class="header-badge">
                 <div class="dot"></div>
                 CLIENT-SIDE PROCESSING ONLY
