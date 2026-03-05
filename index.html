@@ -749,6 +749,35 @@
         .scroll-custom::-webkit-scrollbar-thumb:hover {
             background: var(--text-muted);
         }
+
+        .return-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border-radius: 100px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            font-size: 14px;
+            color: var(--text-primary);
+            font-weight: 700;
+            text-decoration: none;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            margin-bottom: 20px;
+        }
+
+        .return-btn:hover {
+            background: var(--accent-gradient);
+            color: white;
+            border-color: transparent;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4);
+        }
+
+        .return-btn .icon {
+            font-size: 18px;
+        }
     </style>
 </head>
 
@@ -756,6 +785,10 @@
     <div class="app-container">
         <!-- Header -->
         <header class="header">
+            <a href="../financial_analyzer/index.html" class="return-btn fade-in">
+                <span class="icon">📊</span>
+                <span>AI 분석 리포트 생성하러 가기</span>
+            </a>
             <div class="header-badge">
                 <div class="dot"></div>
                 CLIENT-SIDE PROCESSING ONLY
